@@ -7,11 +7,22 @@ var prongs: Array = []
 const MAX_PRONGS := 2
 var beam_blocked := false
 
+var _abilities: Dictionary = {}
+
+func grant_ability(ability: String) -> void:
+	_abilities[ability] = true
+
+func has_ability(ability: String) -> bool:
+	return _abilities.get(ability, false)
+
 var floor_panels: Dictionary = {}
 var doors: Dictionary = {}
 
-func register_floor_panel(grid_pos: Vector2i, id: String) -> void:
-	floor_panels[grid_pos] = id
+func register_floor_panel(grid_pos: Vector2i, id: String, id2: String = "") -> void:
+	var ids: Array = [id]
+	if id2 != "":
+		ids.append(id2)
+	floor_panels[grid_pos] = ids
 
 func register_door(door_node: Node, id: String) -> void:
 	if not doors.has(id):
@@ -38,12 +49,12 @@ func clear_prongs() -> Array:
 
 const PANEL_ACTIVATION_RADIUS := 24.0
 
-func _panel_id_near(world_pos: Vector2) -> String:
+func _panel_near(world_pos: Vector2) -> Vector2i:
 	for gp in floor_panels:
 		var panel_center := Vector2(gp.x * 32 + 16, gp.y * 32 + 16)
 		if world_pos.distance_to(panel_center) <= PANEL_ACTIVATION_RADIUS:
-			return floor_panels[gp]
-	return ""
+			return gp
+	return Vector2i(-999999, -999999)
 
 func evaluate_puzzle() -> void:
 	var ids_to_open: Array = []
@@ -51,11 +62,15 @@ func evaluate_puzzle() -> void:
 	if not beam_blocked and prongs.size() == MAX_PRONGS:
 		var world_a: Vector2 = prongs[0]["node"].position
 		var world_b: Vector2 = prongs[1]["node"].position
-		var id_a := _panel_id_near(world_a)
-		var id_b := _panel_id_near(world_b)
+		var panel_a := _panel_near(world_a)
+		var panel_b := _panel_near(world_b)
+		var ids_a: Array = floor_panels.get(panel_a, [])
+		var ids_b: Array = floor_panels.get(panel_b, [])
 
-		if id_a != "" and id_b != "" and id_a == id_b and prongs[0]["grid_pos"] != prongs[1]["grid_pos"]:
-			ids_to_open.append(id_a)
+		if not ids_a.is_empty() and not ids_b.is_empty() and panel_a != panel_b:
+			for id in ids_a:
+				if id in ids_b and id not in ids_to_open:
+					ids_to_open.append(id)
 
 	for id in doors:
 		doors_update.emit(id, id in ids_to_open)

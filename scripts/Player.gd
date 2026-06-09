@@ -89,7 +89,7 @@ func _process(delta: float) -> void:
 	_sprite.scale = _sprite.scale.lerp(target_scale, 15.0 * delta)
 
 	if moved_x or moved_y:
-		main.check_room_transition(grid_pos)
+		main.check_room_transition(grid_pos, position)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if movement_locked:
@@ -160,6 +160,8 @@ func _move_axis_y(pos: Vector2, dy: float, main: Node) -> Dictionary:
 	return {"pos": Vector2(pos.x, pos.y + allowed), "moved": moved}
 
 func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node) -> bool:
+	if not GameManager.has_ability("push"):
+		return false
 	var dir := Vector2i.ZERO
 	if raw.x > 0.0 and raw.y == 0.0:
 		dir = Vector2i(1, 0)

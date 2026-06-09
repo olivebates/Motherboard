@@ -80,9 +80,11 @@ scenes/
   KeyDoor.tscn             — Solid door that opens when all Keys in the room are collected
   Key.tscn                 — Collectible that unlocks the KeyDoor in the same room
   PassBlock.tscn           — Passable block; player walks through, push blocks cannot enter
+  AbilityPickup.tscn       — Ability unlock pickup (white circle); exports: ability, message
+  AbilityGate.tscn         — Object hidden until a required ability is unlocked; TAB.png sprite
 
 scripts/
-  GameManager.gd           — Autoload singleton (puzzle state)
+  GameManager.gd           — Autoload singleton (puzzle state + ability tracking)
   Main.gd                  — Root scene controller
   Player.gd                — Player movement and input
   Prong.gd                 — Prong placement logic
@@ -99,8 +101,11 @@ scripts/
   PassBlock.gd             — Passthrough block; solid to push blocks, transparent to player
   SplashScreen.gd          — Launch splash; black bg + credit text, dismissed by any key
   YSortHitboxBottom.gd     — Hitbox-bottom Y-sort helpers (Player, Prong)
-  MapOverlay.gd            — Map overlay UI
+  MapOverlay.gd            — Map overlay UI (TAB to open; cursor restricted to visited rooms)
   TeleportAnchor.gd        — Room teleport anchor markers
+  AbilityPickup.gd         — Pickup that grants an ability and shows a dismissable message
+  AbilityMessage.gd        — CanvasLayer message overlay (layer 25); prompt appears after 2s
+  AbilityGate.gd           — Node2D that hides its sprite until required_ability is granted
 
 Sprites/
   placeholder.png          — 32×32 RGBA placeholder
@@ -116,6 +121,7 @@ Sprites/
   key_file3.png            — Key sprite
   electric_front.png       — ElectricBeam sprite (unused; beam drawn procedurally)
   wall1.png                — Wall tile sprite
+  TAB.png                  — AbilityGate sprite
 ```
 
 ---
@@ -128,18 +134,22 @@ Sprites/
 **Key variables:**
 - `prongs: Array` — up to 2 entries, each `{node: Node, grid_pos: Vector2i}`
 - `beam_blocked: bool` — set by Main before `evaluate_puzzle()`
-- `floor_panels: Dictionary` — `Vector2i → String id`
+- `floor_panels: Dictionary` — `Vector2i → Array[String]` (one or two IDs per panel)
 - `doors: Dictionary` — `String id → Array[Node]`
+- `_abilities: Dictionary` — `String → bool`; tracks granted abilities
 - `signal doors_update(id: String, open: bool)`
 - `signal shake_requested(strength: float)`
-- `const PANEL_ACTIVATION_RADIUS := 20.0` — radius (px) for prong-to-panel proximity check
+- `const PANEL_ACTIVATION_RADIUS := 24.0` — radius (px) for prong-to-panel proximity check
 
 **Key functions:**
 - `place_prong(node, grid_pos)` — appends entry
 - `remove_prong(node)` — removes by node reference
 - `clear_prongs()` → `Array` — clears all, returns removed for animation
-- `evaluate_puzzle()` — opens doors if: not beam_blocked, 2 prongs, each within 20px of panel centers sharing the same id, on different tiles
-- `_panel_id_near(world_pos)` — returns panel id if world_pos is within 20px of a panel center
+- `evaluate_puzzle()` — opens doors if: not beam_blocked, 2 prongs on **different** panels sharing at least one id; two prongs on the same panel never open doors
+- `register_floor_panel(grid_pos, id, id2="")` — stores 1–2 IDs for a panel
+- `_panel_near(world_pos)` → `Vector2i` — returns panel grid pos within activation radius, or `(-999999,-999999)`
+- `grant_ability(ability)` — marks ability as acquired
+- `has_ability(ability)` → `bool`
 - `get_prong_positions()` → `Array[Vector2i]`
 - `get_prong_world_positions()` → `Array[Vector2]`
 
@@ -156,15 +166,18 @@ Sprites/
 - `room_entry_positions: Dictionary`
 - `_shake_amount: float` — camera shake magnitude
 
+**Key variables:**
+- `ability_message: Node` — `AbilityMessage` CanvasLayer instance; exposed for `AbilityPickup` to call `show_message()`
+
 **Key functions:**
 - `_setup_y_sort_children()` — enables Y-sort on `Walls`, reparents `Y_SORT_GROUPS` nodes under `wall_tilemap`
 - `_process(delta)` — shake decay → `camera.offset`
 - `_trigger_shake(strength)` — sets `_shake_amount`; connected to `GameManager.shake_requested`
 - `_update_beam()` — checks blockers, sets `GameManager.beam_blocked`, calls `evaluate_puzzle()`, activates/deactivates beam
-- `spawn_prong(pixel_pos)` — `pixel_pos` is hitbox center (`player.get_body_center()`); 3rd press clears both via `Prong.apply_clear_shrink()`; otherwise instantiate as child of `wall_tilemap` and `setup()`
+- `spawn_prong(pixel_pos)` — `pixel_pos` is hitbox center; if 2 prongs already exist, oldest is removed with shrink animation before placing new one (no "clear both" behaviour)
 - `_reset_room()` — locks player → ResetEffect fades in → awaits `peaked` → resets room state → awaits `done` → unlocks player
 - `_transition_to_room(new_room)` — clears prongs instantly, tweens camera 0.25s
-- `check_room_transition(player_grid)` — uses `floori` division to support negative room coordinates
+- `check_room_transition(player_grid, player_pixel)` — uses `floori` division; downward and rightward transitions require player pixel position to be 24px past the boundary before firing
 - `tile_rect(grid_pos)` → `Rect2` — 32×32 world rect for a grid tile
 - `_is_static_solid(grid_pos)` — walls, closed doors, lightning blockers, key doors (NOT push blocks, NOT pass blocks)
 - `is_blocked(grid_pos)` — static solids + push blocks (used for grid queries elsewhere)
@@ -173,6 +186,7 @@ Sprites/
 - `get_push_block_at_face(player_rect, dir, from_point)` → `Node` — among push blocks flush against `player_rect` on the given face, returns the one whose center is closest to `from_point`
 - `has_pass_block_at(grid_pos)` — checks pass_blocks group
 - `get_push_block_at(grid_pos)` → Node or null
+- `_find_nearest_open_tile(start)` — BFS for nearest unblocked tile; uses `is_blocked` (includes push blocks)
 
 ---
 
@@ -187,7 +201,7 @@ Sprites/
 
 **Movement (AABB collision):** Root `position` is hitbox bottom. `_hitbox_rect(pos)` = `pos + _body_offset + _hitbox_offset`. Axis-separated movement against `Main.get_player_blocking_rects()`. Squash/stretch on dominant axis. Pass blocks are not solids.
 
-**Push detection:** After movement; single cardinal input; flush against push-block face. Closest block by `_sprite_center()`. On success: `block.push(dir)`, shake (0.8), `PUSH_FREEZE` axis lock.
+**Push detection:** After movement; single cardinal input; flush against push-block face. Closest block by `_sprite_center()`. On success: `block.push(dir)`, shake (0.8), `PUSH_FREEZE` axis lock. Push is **gated** by `GameManager.has_ability("push")` — no pushing until that ability is acquired.
 
 **Key functions:** `get_body_center()` → hitbox center world pos; `_hitbox_rect(pos)`, `_sprite_center()`, `_grid_to_world()` / `_world_to_grid()`, `reset_to(gp)`, `_try_push()`, `_start_push_lock(dir)`
 
@@ -234,6 +248,7 @@ Sprites/
 
 - Beam is **white**, fully opaque. Glow Line2D is hidden (`line_glow.visible = false`)
 - Beam width pulses via `sin(time * 8)`. Endpoint glow circles drawn white in `_draw()`
+- All waypoint positions are offset by `Vector2(0, -4)` in `_resolve_waypoints()` so the beam renders 4px above each node's origin
 - `activate(points)` — ordered list: prong A → nuts → prong B
 - `deactivate()` — hides beam
 
@@ -247,9 +262,10 @@ Sprites/
 ---
 
 ### FloorPanel.gd (Node2D)
-- `@export var id: String`; `@export var positive: bool = true`
+- `@export var id: String`; `@export var id2: String = ""`; `@export var positive: bool = true`
+- Supports up to two IDs; both registered with `GameManager.register_floor_panel(gp, id, id2)`
 - Sprite is hidden; drawn manually via `_draw()` so circle can render on top
-- `_process`: checks if any prong is within `PANEL_ACTIVATION_RADIUS` (20px) of panel center; calls `queue_redraw()` on state change
+- `_process`: checks if any prong is within `PANEL_ACTIVATION_RADIUS` (24px) of panel center; calls `queue_redraw()` on state change
 - `_draw()`: draws sprite texture, then draws white circle outline (radius 17px) when active
 - Registers in GameManager with grid position
 
@@ -296,6 +312,32 @@ Sprites/
 - Intercepts all input via `_input`; dismissed by any key/mouse/joypad press
 - On dismiss: consumes the input event, unlocks player, frees self
 - Player movement is locked in `Main._ready()` until dismissed
+
+---
+
+### AbilityPickup.gd (Node2D)
+- Group `"ability_pickups"`; positioned at tile top-left like other collectibles
+- `@export var ability: String` — ability name to grant (e.g. `"push"`)
+- `@export var message: String` — text shown in the message overlay on collect
+- Draws a white filled circle (radius 10px) at `(16, 16)` via `_draw()`; hidden after collect
+- On collect: grants ability via `GameManager.grant_ability()`, sets `room_entry_positions[current_room]` to player's grid pos, locks player, shows `Main.ability_message`
+- `reset()` — re-shows pickup (does not revoke ability)
+
+---
+
+### AbilityMessage.gd (CanvasLayer, layer=25)
+- Instantiated by Main on `_ready()`; exposed as `main.ability_message`
+- Starts hidden (`visible = false`)
+- `show_message(text)` — shows overlay immediately; after 2 seconds shows "Press any key to continue..." prompt at the bottom
+- Input is only accepted once the prompt is visible; any key/button press dismisses and emits `dismissed`
+- `dismissed` signal used by `AbilityPickup` to unlock player movement
+
+---
+
+### AbilityGate.gd (Node2D)
+- `@export var required_ability: String = "push"`
+- Sprite starts hidden; `_process` shows it as soon as `GameManager.has_ability(required_ability)` returns true
+- Uses `TAB.png` sprite (`centered = false`)
 
 ---
 
@@ -375,6 +417,13 @@ PassBlock.tscn:
   Node2D [PassBlock.gd]
   └── Sprite2D [switch_open2.png, centered=false]
 
+AbilityPickup.tscn:
+  Node2D [AbilityPickup.gd]  ← no sprite child; circle drawn via _draw()
+
+AbilityGate.tscn:
+  Node2D [AbilityGate.gd]
+  └── Sprite2D [TAB.png, centered=false, visible=false]
+
 Nut.tscn:
   Node2D [Nut.gd]
   ├── Sprite2D [washer_block.png, centered=false]
@@ -402,6 +451,8 @@ All objects use `centered = false`.
 | KeyDoor | (door sprite) | tile top-left |
 | Key | key_file3.png | tile top-left |
 | PassBlock | switch_open2.png | tile top-left |
+| AbilityPickup | (drawn via _draw) | tile top-left |
+| AbilityGate | TAB.png | tile top-left |
 
 Floor: black `Color(0, 0, 0)` drawn in `Main._draw()`. Background: black.
 

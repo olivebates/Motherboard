@@ -1,13 +1,14 @@
 extends Node2D
 
 @export var id: String = ""
+@export var id2: String = ""
 @export var positive: bool = true
 
 var _active := false
 
 func _ready() -> void:
 	var gp := Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
-	GameManager.register_floor_panel(gp, id)
+	GameManager.register_floor_panel(gp, id, id2)
 	if positive:
 		$Sprite2D.texture = load("res://Sprites/positive.png")
 	else:

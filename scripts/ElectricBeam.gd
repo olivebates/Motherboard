@@ -50,7 +50,8 @@ func _process(delta: float) -> void:
 func _resolve_waypoints() -> Array:
 	var out: Array = []
 	for w in waypoints:
-		out.append(w.get_beam_point() if w is Node2D else w)
+		var pt: Vector2 = w.get_beam_point() if w is Node2D else w
+		out.append(pt + Vector2(0.0, -4.0))
 	return out
 
 func _rebuild_points() -> void:

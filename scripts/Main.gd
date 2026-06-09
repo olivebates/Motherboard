@@ -22,6 +22,7 @@ var _shake_amount := 0.0
 
 var reset_effect: Node
 var map_overlay: Node
+var ability_message: Node
 var _color_tween: Tween = null
 
 const ProngScene = preload("res://scenes/Prong.tscn")
@@ -29,6 +30,7 @@ const ProngScene = preload("res://scenes/Prong.tscn")
 const ResetEffectScene = preload("res://scripts/ResetEffect.gd")
 const SplashScreenScene = preload("res://scripts/SplashScreen.gd")
 const MapOverlayScene = preload("res://scripts/MapOverlay.gd")
+const AbilityMessageScene = preload("res://scripts/AbilityMessage.gd")
 
 const Y_SORT_GROUPS := [
 	"players",
@@ -46,6 +48,8 @@ func _ready() -> void:
 	room_entry_positions[Vector2i(0, 0)] = Vector2i(2, 2)
 	reset_effect = ResetEffectScene.new()
 	add_child(reset_effect)
+	ability_message = AbilityMessageScene.new()
+	add_child(ability_message)
 	reset_effect.color = modulate
 	map_overlay = MapOverlayScene.new()
 	add_child(map_overlay)
@@ -218,12 +222,20 @@ func get_push_block_at(grid_pos: Vector2i) -> Node:
 			return block
 	return null
 
-func check_room_transition(player_grid: Vector2i) -> void:
+func check_room_transition(player_grid: Vector2i, player_pixel: Vector2 = Vector2.ZERO) -> void:
 	var player_room := Vector2i(
 		floori(float(player_grid.x) / ROOM_WIDTH),
 		floori(float(player_grid.y) / ROOM_HEIGHT)
 	)
 	if player_room != current_room:
+		if player_room.y > current_room.y:
+			var boundary_y := (current_room.y + 1) * ROOM_HEIGHT * TILE_SIZE
+			if player_pixel.y < boundary_y + 24.0:
+				return
+		if player_room.x > current_room.x:
+			var boundary_x := (current_room.x + 1) * ROOM_WIDTH * TILE_SIZE
+			if player_pixel.x < boundary_x + 24.0:
+				return
 		_transition_to_room(player_room)
 
 func _transition_to_room(new_room: Vector2i) -> void:
@@ -270,7 +282,7 @@ func _on_teleport_requested(room: Vector2i) -> void:
 		push_error("No TeleportAnchor in room %s" % str(room))
 		return
 	var spawn_grid := Vector2i(floori(anchor.position.x / TILE_SIZE), floori(anchor.position.y / TILE_SIZE))
-	if _is_static_solid(spawn_grid):
+	if is_blocked(spawn_grid):
 		spawn_grid = _find_nearest_open_tile(spawn_grid)
 	player.reset_to(spawn_grid)
 	_transition_to_room(room)
@@ -281,7 +293,7 @@ func _find_nearest_open_tile(start: Vector2i) -> Vector2i:
 	var queue: Array[Vector2i] = [start]
 	while not queue.is_empty():
 		var current = queue.pop_front()
-		if not _is_static_solid(current):
+		if not is_blocked(current):
 			return current
 		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 			var n = current + d
@@ -298,15 +310,12 @@ func _room_center(room: Vector2i) -> Vector2:
 
 func spawn_prong(pixel_pos: Vector2) -> void:
 	if GameManager.prongs.size() >= 2:
-		# Third press: animate both out and clear
-		for p in GameManager.clear_prongs():
-			var node: Node2D = p["node"]
-			var tween := node.create_tween()
-			tween.tween_method(node.apply_clear_shrink, 1.0, 0.0, 0.15)
-			tween.tween_callback(node.queue_free)
-		_update_beam()
-		_trigger_shake(6.0)
-		return
+		var oldest = GameManager.prongs[0]
+		GameManager.remove_prong(oldest["node"])
+		var node: Node2D = oldest["node"]
+		var tween := node.create_tween()
+		tween.tween_method(node.apply_clear_shrink, 1.0, 0.0, 0.15)
+		tween.tween_callback(node.queue_free)
 	var prong := ProngScene.instantiate()
 	wall_tilemap.add_child(prong)
 	prong.setup(pixel_pos)

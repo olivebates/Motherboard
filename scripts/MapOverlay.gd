@@ -47,21 +47,23 @@ func _input(event: InputEvent) -> void:
 		return
 	get_viewport().set_input_as_handled()
 	if event.is_action_pressed("move_up"):
-		_cursor += Vector2i(0, -1)
-		_draw_node.queue_redraw()
+		_try_move_cursor(Vector2i(0, -1))
 	elif event.is_action_pressed("move_down"):
-		_cursor += Vector2i(0, 1)
-		_draw_node.queue_redraw()
+		_try_move_cursor(Vector2i(0, 1))
 	elif event.is_action_pressed("move_left"):
-		_cursor += Vector2i(-1, 0)
-		_draw_node.queue_redraw()
+		_try_move_cursor(Vector2i(-1, 0))
 	elif event.is_action_pressed("move_right"):
-		_cursor += Vector2i(1, 0)
-		_draw_node.queue_redraw()
+		_try_move_cursor(Vector2i(1, 0))
 	elif event.is_action_pressed("place_prong"):
 		if _visited.has(_cursor):
 			teleport_requested.emit(_cursor)
 			_close_map()
+
+func _try_move_cursor(dir: Vector2i) -> void:
+	var next := _cursor + dir
+	if _visited.has(next):
+		_cursor = next
+		_draw_node.queue_redraw()
 
 func _open_map() -> void:
 	_open = true
@@ -176,7 +178,8 @@ func _on_draw() -> void:
 	var csp := _room_to_screen(_cursor, origin, min_room)
 	_draw_node.draw_rect(Rect2(csp, Vector2(CELL_W, CELL_H)), Color(1.0, 1.0, 0.3), false, 2.0)
 
-	# Bottom label
-	_draw_node.draw_string(font, Vector2(vp.x * 0.5, vp.y - 8.0),
+	# Bottom label — centered X, below the lowest room
+	var map_bottom := origin.y + (max_room.y - min_room.y) * STEP_Y + CELL_H + 36.0
+	_draw_node.draw_string(font, Vector2(0.0, map_bottom),
 			"WASD: Move    Space: Teleport",
 			HORIZONTAL_ALIGNMENT_CENTER, vp.x, 11, Color.WHITE)
