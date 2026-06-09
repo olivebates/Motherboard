@@ -19,7 +19,7 @@ func _process(_delta: float) -> void:
 	if player == null:
 		return
 	var key_center := position + Vector2(16.0, 16.0)
-	if key_center.distance_to(player.position) <= 16.0:
+	if key_center.distance_to(player.get_body_center()) <= 16.0:
 		_collect(player)
 
 func get_grid_pos() -> Vector2i:
@@ -34,7 +34,7 @@ func _collect(player: Node2D) -> void:
 	for door in get_tree().get_nodes_in_group("key_doors"):
 		if _room_of(door.position) == my_room:
 			door.key_collected()
-	var target := player.position - Vector2(16.0, 16.0)
+	var target = player.get_body_center() - Vector2(16.0, 16.0)
 	if _collect_tween:
 		_collect_tween.kill()
 	_collect_tween = create_tween().set_parallel(true)

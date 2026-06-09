@@ -23,12 +23,42 @@ CAMERA_MARGIN = Vector2(16, 16)   (camera center offset from exact room center)
 - Rooms support negative coordinates (room y can be negative); room detection uses `floori` to handle this
 
 **Node position conventions (all objects):**
-- Player, Prong, PushBlock, Nut → positioned at **tile center** (`col*32+16, row*32+16`)
-- Door, FloorPanel, LightningBlocker, WallTileMap, KeyDoor, Key → positioned at **tile top-left**
+- **Player, Prong** — root `Node2D` position is the **hitbox bottom** (Y-sort key). A `Body` child is offset upward so sprites stay tile-centered; see Y-Sorting below.
+- **PushBlock, Nut** → positioned at **tile top-left** (`col*32, row*32`); sprite at `(0, 0)`
+- Door, FloorPanel, LightningBlocker, KeyDoor, Key, PassBlock → positioned at **tile top-left**
 
 **Sprite origin convention:** All sprites use `centered = false` (top-left origin).
-- For tile-center nodes: sprite has a `(-16, -16)` offset so it covers the tile correctly
-- For tile-top-left nodes: sprite at `(0, 0)` fills the tile naturally
+- Player / Prong: sprite on `Body` at `(-16, -16)` so it covers the tile when the body origin is at tile center
+- PushBlock / Nut: sprite at `(0, 0)` on the root node
+- Tile-top-left objects: sprite at `(0, 0)` fills the tile naturally
+
+---
+
+## Y-Sorting (depth)
+
+Godot Y-sorts by each node's `position.y` (higher Y = drawn in front). Walls use per-tile sort at **tile top** (`y_sort_origin = 0` on wall tiles).
+
+**Setup (`Main._setup_y_sort_children()`):**
+- `Walls` `TileMapLayer` has `y_sort_enabled = true`; `Main` does not
+- At startup, gameplay nodes in `Y_SORT_GROUPS` are reparented under `Walls` (global transform preserved) so they sort in the same pass as wall tiles
+- New prongs are spawned as children of `wall_tilemap` directly
+
+**`Y_SORT_GROUPS`:** `players`, `prongs`, `doors`, `lightning_blockers`, `key_doors`, `push_blocks`, `pass_blocks`, `keys`
+
+**Depth rule:** compare actor **hitbox bottom** vs solid **tile top**.
+- Hitbox bottom below tile top (larger Y) → actor in front
+- Hitbox bottom above tile top (smaller Y) → actor behind
+
+**Player & Prong (`YSortHitboxBottom.gd`):**
+- Root position = hitbox bottom (movement / Y-sort for player)
+- `Body` child at `(0, -(hitbox_offset.y + half_h))` keeps sprite + hitbox in the original tile-centered layout
+- `SPRITE_OFFSET = (-16, -16)` on `Body`
+- Player hitbox: 10×10 on `Body`, offset `(0, 8)` → `_body_offset = (0, -13)`
+- Prong hitbox: 8×8 on `Body`, offset `(0, 0)` → `_body_offset = (0, -4)`; placed via `setup(hitbox_center)`
+
+**Other solids (doors, blockers, key doors, push blocks, etc.):** node at tile top-left; sort Y = tile top (same as walls).
+
+**Not Y-sorted with walls:** `ElectricBeam` (`z_index = 10`), `FloorPanel` (`z_index = -10`), UI sprites, camera, overlays.
 
 ---
 
@@ -68,6 +98,9 @@ scripts/
   Nut.gd                   — Pushable conductor; beam routes through it
   PassBlock.gd             — Passthrough block; solid to push blocks, transparent to player
   SplashScreen.gd          — Launch splash; black bg + credit text, dismissed by any key
+  YSortHitboxBottom.gd     — Hitbox-bottom Y-sort helpers (Player, Prong)
+  MapOverlay.gd            — Map overlay UI
+  TeleportAnchor.gd        — Room teleport anchor markers
 
 Sprites/
   placeholder.png          — 32×32 RGBA placeholder
@@ -124,10 +157,11 @@ Sprites/
 - `_shake_amount: float` — camera shake magnitude
 
 **Key functions:**
+- `_setup_y_sort_children()` — enables Y-sort on `Walls`, reparents `Y_SORT_GROUPS` nodes under `wall_tilemap`
 - `_process(delta)` — shake decay → `camera.offset`
 - `_trigger_shake(strength)` — sets `_shake_amount`; connected to `GameManager.shake_requested`
 - `_update_beam()` — checks blockers, sets `GameManager.beam_blocked`, calls `evaluate_puzzle()`, activates/deactivates beam
-- `spawn_prong(pixel_pos)` — 3rd press clears both (animate: shrink to top-center); otherwise instantiate and place
+- `spawn_prong(pixel_pos)` — `pixel_pos` is hitbox center (`player.get_body_center()`); 3rd press clears both via `Prong.apply_clear_shrink()`; otherwise instantiate as child of `wall_tilemap` and `setup()`
 - `_reset_room()` — locks player → ResetEffect fades in → awaits `peaked` → resets room state → awaits `done` → unlocks player
 - `_transition_to_room(new_room)` — clears prongs instantly, tweens camera 0.25s
 - `check_room_transition(player_grid)` — uses `floori` division to support negative room coordinates
@@ -147,32 +181,39 @@ Sprites/
 
 **Constants:** `SPEED=272 px/s`, `SPRITE_SPEED=20.0`, `CONTACT_EPS=0.1`, `PUSH_FREEZE=0.15`
 
-**Hitbox:** Defined by a `CollisionShape2D` child node named `Hitbox` with a `RectangleShape2D` shape. Size and offset are read in `_ready()` from the node — edit in the Godot editor to change collision dimensions. At runtime: `_half_w`, `_half_h`, `_hitbox_offset` store the derived values. Currently 10×10, offset (0, 11).
+**Scene structure:** Root `Node2D` (script) → `Body` → `Sprite2D` + `Hitbox`. Root `position` = **hitbox bottom** (Y-sort + movement anchor). `Body` holds visuals/collision at tile-centered layout.
 
-**Movement (AABB collision):** Input → normalized velocity → axis-separated movement (X then Y). Each axis uses `_move_axis_x` / `_move_axis_y` to clamp motion against `Main.get_player_blocking_rects()` so the hitbox stops exactly at solid edges (walls, doors, blockers, key doors, push blocks). Squash/stretch: `(1.15, 0.85)` or `(0.85, 1.15)` on dominant axis. Pass blocks are not solids for the player.
+**Hitbox:** `Body/Hitbox` `CollisionShape2D`, `RectangleShape2D` 10×10 at `(0, 8)`. Read in `_ready()` via `YSortHitboxBottom.read_hitbox()`; `_body_offset` computed so hitbox bottom sits on root origin.
 
-**Push detection:** Runs after movement each frame. Requires a single cardinal key (no diagonals). Player must be stopped on the push axis (`moved_x`/`moved_y` false for that axis) with hitbox flush against a push-block face (`FACE_EPS=0.1`). If multiple blocks qualify, `Main.get_push_block_at_face()` picks the one closest to the player sprite center (`_sprite_center()`). Destination must pass `can_push_block_to()`. On success: `block.push(dir)`, camera shake (0.8), and a directional push lock for `PUSH_FREEZE` seconds — only movement and re-push in the same direction are blocked; perpendicular movement is allowed immediately.
+**Movement (AABB collision):** Root `position` is hitbox bottom. `_hitbox_rect(pos)` = `pos + _body_offset + _hitbox_offset`. Axis-separated movement against `Main.get_player_blocking_rects()`. Squash/stretch on dominant axis. Pass blocks are not solids.
 
-**Key functions:** `_hitbox_rect(pos)`, `_sprite_center()`, `_try_push()`, `_is_movement_locked_on_axis()`, `_start_push_lock(dir)`
+**Push detection:** After movement; single cardinal input; flush against push-block face. Closest block by `_sprite_center()`. On success: `block.push(dir)`, shake (0.8), `PUSH_FREEZE` axis lock.
+
+**Key functions:** `get_body_center()` → hitbox center world pos; `_hitbox_rect(pos)`, `_sprite_center()`, `_grid_to_world()` / `_world_to_grid()`, `reset_to(gp)`, `_try_push()`, `_start_push_lock(dir)`
+
+**References `Main` via `get_tree().current_scene`** (not `get_parent()`), because the player is reparented under `Walls` at runtime.
 
 ---
 
 ### Prong.gd (Node2D)
-- `grid_pos: Vector2i` — `floori(position.x / 32), floori(position.y / 32)`
-- `setup(pixel_pos)` — sets position; sprite `centered=false`, offset `(-16,-16)`; tweens scale `0 → 1.3 → 1`
-- **Max 2.** Third press clears both with a shrink-to-top-center animation (scale + sprite.position.x tweened together)
+- Group `"prongs"`; same `Body` / hitbox-bottom layout as Player (8×8 hitbox on `Body`)
+- `grid_pos: Vector2i` — `floori(position.x / 32), floori(position.y / 32)` (root = hitbox bottom)
+- `setup(pixel_pos)` — `pixel_pos` is hitbox center; root placed via `YSortHitboxBottom.root_pos_from_hitbox_center()`; sprite `(-16,-16)`; tweens scale `0 → 1.3 → 1`
+- `apply_clear_shrink(s)` — shrink-to-center clear animation (called from `Main.spawn_prong()`)
+- **Max 2.** Third press clears both, then deactivates beam
 
 ---
 
 ### Nut.gd (Node2D)
-**Purpose:** Pushable conductor. Identical push/reset behaviour to PushBlock but also in `"nuts"` group. After its slide tween finishes, calls `Main._update_beam()`. `get_beam_point()` returns visual sprite center for beam routing. `get_collision_rect()` → 32×32 world `Rect2` for player collision/push queries.
+**Purpose:** Pushable conductor. Identical push/reset behaviour to PushBlock (tile top-left node, `SPRITE_OFFSET = (0, 0)`) but also in `"nuts"` group. After slide tween, calls `Main._update_beam()` via `get_tree().current_scene`. `get_beam_point()` returns sprite center. `get_collision_rect()` → 32×32 world `Rect2`.
 
 ---
 
 ### PushBlock.gd (Node2D)
 **Purpose:** Instantly teleports one tile when pushed; sprite slides to simulate smooth movement.
 
-- `_ready()` — infers `start_grid_pos` from editor placement position (like Nut); no need to set export manually
+- Node at **tile top-left**; `SPRITE_OFFSET = (0, 0)`; `_grid_to_world(gp)` → `(gp.x * 32, gp.y * 32)`
+- `_ready()` — infers `start_grid_pos` from editor placement, snaps to tile top-left
 - `get_collision_rect()` → 32×32 world `Rect2` for player collision/push queries
 - `push(direction)` — teleports node, slides sprite from old position
 - `reset()` — restores `start_grid_pos`, snaps sprite
@@ -235,7 +276,8 @@ Sprites/
 
 ### Key.gd (Node2D)
 - No `door_id` export — notifies KeyDoors in the same room on collect
-- `_collect(player)` — immediately notifies all KeyDoors in room, then tweens: node flies to player while sprite shrinks toward its own center (scale + position.x/y compensated) over 0.15s
+- Pickup range uses `player.get_body_center()` (hitbox center), not root position
+- `_collect(player)` — notifies KeyDoors, then tweens toward `player.get_body_center()`
 - `reset()` — only resets if a KeyDoor still exists in the same room (door not permanently opened); restores position, scale, sprite.position
 
 ---
@@ -258,21 +300,43 @@ Sprites/
 ---
 
 ### WallTileMap.gd (TileMapLayer)
-**Purpose:** Painted in the Godot editor to define wall tiles. Auto-configures its TileSet in `_ready()`.
+**Purpose:** Painted in the Godot editor to define wall tiles. Auto-configures its TileSet in `_ready()`. `y_sort_enabled = true`; parent layer for all Y-sorted gameplay entities (see Y-Sorting).
+
+---
+
+### YSortHitboxBottom.gd (class_name)
+**Purpose:** Shared math for Player and Prong hitbox-bottom Y-sort layout.
+
+- `SPRITE_OFFSET` — `Vector2(-16, -16)`
+- `read_hitbox(hitbox)` → `{half_w, half_h, offset}`
+- `body_offset_from_hitbox(offset, half_h)` → `Vector2(0, -(offset.y + half_h))`
+- `hitbox_center_from_root(root_pos, body_offset, hitbox_offset)`
+- `root_pos_from_hitbox_center(center, body_offset, hitbox_offset)`
 
 ---
 
 ## Scenes (Node Structures)
 
 ```
+Main.tscn (runtime Y-sort):
+  Main [Main.gd, y_sort_enabled=false]
+  ├── Walls [TileMapLayer, y_sort_enabled=true, y_sort_origin=0 per tile]
+  │     ├── Player, Prong(s), Door(s), LightningBlocker(s), KeyDoor(s),
+  │     │   PushBlock(s), Nut(s), PassBlock(s), Key(s)  ← reparented at _ready
+  │     └── (wall tile cells)
+  ├── Camera2D, ElectricBeam, FloorPanel(s), UI sprites, …
+
 Player.tscn:
-  Node2D [Player.gd]
-  ├── Sprite2D [centered=false]
-  └── Hitbox [CollisionShape2D, RectangleShape2D — edit size/position here to change push/collision box]
+  Node2D [Player.gd]  ← root position = hitbox bottom
+  └── Body [Node2D, offset (0, -13) at runtime]
+      ├── Sprite2D [electric_front.png, centered=false, offset (-16,-16)]
+      └── Hitbox [CollisionShape2D, 10×10 at (0, 8)]
 
 Prong.tscn:
-  Node2D [Prong.gd]
-  └── Sprite2D [stake.png, centered=false]
+  Node2D [Prong.gd]  ← root position = hitbox bottom
+  └── Body [Node2D, offset (0, -4) at runtime]
+      ├── Sprite2D [stake.png, centered=false, offset (-16,-16)]
+      └── Hitbox [CollisionShape2D, 8×8 at (0, 0)]
 
 PushBlock.tscn:
   Node2D [PushBlock.gd]
@@ -328,13 +392,13 @@ All objects use `centered = false`.
 
 | Object | Sprite | Node position |
 |---|---|---|
-| Player | (player sprite) | tile center |
-| Prong | stake.png | exact pixel (placed by player) |
-| PushBlock | SD_Card_block.png | tile center (inferred from editor placement) |
+| Player | electric_front.png | hitbox bottom (body/visual at tile center) |
+| Prong | stake.png | hitbox bottom (placed at hitbox center from player) |
+| PushBlock | SD_Card_block.png | tile top-left |
+| Nut | washer_block.png | tile top-left |
 | Door | switch_closed.png | tile top-left |
 | FloorPanel | positive.png / negative.png | tile top-left |
 | LightningBlocker | resistor_small.png / resistor_small2.png | tile top-left |
-| Nut | washer_block.png | tile center |
 | KeyDoor | (door sprite) | tile top-left |
 | Key | key_file3.png | tile top-left |
 | PassBlock | switch_open2.png | tile top-left |
@@ -347,9 +411,9 @@ Floor: black `Color(0, 0, 0)` drawn in `Main._draw()`. Background: black.
 
 ```
 Player presses Space:
-  → Main.spawn_prong(pixel_pos)
-      if 2 prongs exist: clear both (shrink-to-top-center animation), deactivate beam, return
-      else: place prong → _update_beam():
+  → Main.spawn_prong(player.get_body_center())
+      if 2 prongs exist: clear both (Prong.apply_clear_shrink), deactivate beam, return
+      else: place prong under Walls tilemap → _update_beam():
           → _compute_beam_path() via nuts
           → set GameManager.beam_blocked, call evaluate_puzzle()
           → activate or deactivate beam; flash blocking blockers
@@ -398,7 +462,9 @@ Room transition (player walks to edge):
 | Camera shake on prong/door/push events | Main.gd `_trigger_shake()` |
 | Player sprite squash/stretch | Player.gd `_process` |
 | Prong pop animation (scale 0→1.3→1) | Prong.gd `setup()` |
-| Prong clear animation (shrink to top-center) | Main.gd `spawn_prong()` |
+| Prong clear animation (shrink to top-center) | Prong.gd `apply_clear_shrink()`, Main.gd `spawn_prong()` |
+| Y-sort depth (hitbox bottom vs tile top) | Main.gd `_setup_y_sort_children()`, YSortHitboxBottom.gd |
+| Sprite lag on player move | Player.gd `visual_pos` lerp on `Body/Sprite2D` |
 | Push block sprite slide | PushBlock.gd `push()` |
 | Push directional freeze (0.15s, push axis only) | Player.gd `_start_push_lock()` |
 | Closest-block push selection | Main.gd `get_push_block_at_face()` |

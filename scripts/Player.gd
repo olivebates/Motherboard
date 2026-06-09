@@ -11,32 +11,44 @@ var movement_locked := false
 var visual_pos: Vector2
 var _push_lock_dir := Vector2i.ZERO
 var _push_tween: Tween
+var _main: Node2D
 
-# Derived from the Hitbox node in _ready — edit the CollisionShape2D in the editor
-var _half_w := 8.0
-var _half_h := 8.0
+@onready var _body: Node2D = $Body
+@onready var _sprite: Sprite2D = $Body/Sprite2D
+@onready var _hitbox: CollisionShape2D = $Body/Hitbox
+
+# Root position is hitbox bottom (Y-sort). Body holds sprite + hitbox at tile-center layout.
+var _half_w := 5.0
+var _half_h := 5.0
 var _hitbox_offset := Vector2(0.0, 8.0)
+var _body_offset := Vector2.ZERO
 
 var grid_pos: Vector2i:
 	get:
 		return _world_to_grid(position)
 
 func _ready() -> void:
-	visual_pos = position
-	$Sprite2D.centered = false
+	_main = get_tree().current_scene as Node2D
+	_sprite.centered = false
 	add_to_group("players")
-	var hitbox := $Hitbox as CollisionShape2D
-	var rect := hitbox.shape as RectangleShape2D
-	_half_w = rect.size.x * 0.5
-	_half_h = rect.size.y * 0.5
-	_hitbox_offset = hitbox.position
+	var cfg := YSortHitboxBottom.read_hitbox(_hitbox)
+	_half_w = cfg.half_w
+	_half_h = cfg.half_h
+	_hitbox_offset = cfg.offset
+	_body_offset = YSortHitboxBottom.body_offset_from_hitbox(_hitbox_offset, _half_h)
+	_body.position = _body_offset
+	visual_pos = position + _body_offset
+
+func get_body_center() -> Vector2:
+	return YSortHitboxBottom.hitbox_center_from_root(position, _body_offset, _hitbox_offset)
 
 func _process(delta: float) -> void:
-	visual_pos = visual_pos.lerp(position, minf(1.0, SPRITE_SPEED * delta))
-	$Sprite2D.position = visual_pos - position + Vector2(-16.0, -16.0)
+	var body_center := position + _body_offset
+	visual_pos = visual_pos.lerp(body_center, minf(1.0, SPRITE_SPEED * delta))
+	_sprite.position = visual_pos - body_center + YSortHitboxBottom.SPRITE_OFFSET
 
 	if movement_locked:
-		$Sprite2D.scale = $Sprite2D.scale.lerp(Vector2.ONE, 15.0 * delta)
+		_sprite.scale = _sprite.scale.lerp(Vector2.ONE, 15.0 * delta)
 		return
 
 	var raw := Vector2(
@@ -48,7 +60,7 @@ func _process(delta: float) -> void:
 		input = input.normalized()
 
 	var velocity := input * SPEED
-	var main: Node = get_parent()
+	var main: Node = _main
 
 	var dx := velocity.x * delta
 	var dy := velocity.y * delta
@@ -74,7 +86,7 @@ func _process(delta: float) -> void:
 		target_scale = Vector2(1.15, 0.85)
 	elif moved_y:
 		target_scale = Vector2(0.85, 1.15)
-	$Sprite2D.scale = $Sprite2D.scale.lerp(target_scale, 15.0 * delta)
+	_sprite.scale = _sprite.scale.lerp(target_scale, 15.0 * delta)
 
 	if moved_x or moved_y:
 		main.check_room_transition(grid_pos)
@@ -83,10 +95,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if movement_locked:
 		return
 	if event.is_action_pressed("place_prong"):
-		get_parent().spawn_prong(position)
+		_main.spawn_prong(get_body_center())
 
 func _hitbox_rect(pos: Vector2) -> Rect2:
-	var center := pos + _hitbox_offset
+	var center := pos + _body_offset + _hitbox_offset
 	return Rect2(center.x - _half_w, center.y - _half_h, _half_w * 2.0, _half_h * 2.0)
 
 func _move_axis_x(pos: Vector2, dx: float, main: Node) -> Dictionary:
@@ -182,10 +194,9 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node) -> bool:
 	return true
 
 func _sprite_center() -> Vector2:
-	var spr := $Sprite2D as Sprite2D
-	if spr.texture:
-		return global_position + spr.position + spr.texture.get_size() * 0.5
-	return global_position
+	if _sprite.texture:
+		return global_position + _body_offset + _sprite.position + _sprite.texture.get_size() * 0.5
+	return global_position + _body_offset
 
 func _is_movement_locked_on_axis(is_x: bool, delta_axis: float) -> bool:
 	if _push_lock_dir == Vector2i.ZERO or delta_axis == 0.0:
@@ -211,16 +222,18 @@ func _rects_overlap_y(a: Rect2, b: Rect2) -> bool:
 	return a.position.y < b.end.y and b.position.y < a.end.y
 
 func _world_to_grid(world_pos: Vector2) -> Vector2i:
+	var hitbox_center_y := world_pos.y + _body_offset.y + _hitbox_offset.y
 	return Vector2i(
 		floori((world_pos.x - WORLD_OFFSET) / TILE_SIZE),
-		floori((world_pos.y - WORLD_OFFSET) / TILE_SIZE)
+		floori((hitbox_center_y - WORLD_OFFSET) / TILE_SIZE)
 	)
 
 func _grid_to_world(gp: Vector2i) -> Vector2:
-	return Vector2(
+	var hitbox_center := Vector2(
 		WORLD_OFFSET + gp.x * TILE_SIZE + TILE_SIZE / 2,
 		WORLD_OFFSET + gp.y * TILE_SIZE + TILE_SIZE / 2
 	)
+	return YSortHitboxBottom.root_pos_from_hitbox_center(hitbox_center, _body_offset, _hitbox_offset)
 
 func lock_movement() -> void:
 	movement_locked = true
@@ -230,4 +243,4 @@ func unlock_movement() -> void:
 
 func reset_to(gp: Vector2i) -> void:
 	position = _grid_to_world(gp)
-	visual_pos = position
+	visual_pos = position + _body_offset

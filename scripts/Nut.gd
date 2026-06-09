@@ -2,7 +2,7 @@ extends Node2D
 
 const TILE_SIZE := 32
 const SLIDE_DURATION := 0.15
-const SPRITE_OFFSET := Vector2(-16.0, -16.0)
+const SPRITE_OFFSET := Vector2.ZERO
 
 var grid_pos: Vector2i = Vector2i.ZERO
 var start_grid_pos: Vector2i = Vector2i.ZERO
@@ -41,7 +41,11 @@ func push(direction: Vector2i) -> void:
 	_tween.set_ease(Tween.EASE_OUT)
 	_tween.set_trans(Tween.TRANS_SINE)
 	_tween.tween_property(sprite, "position", SPRITE_OFFSET, SLIDE_DURATION)
-	_tween.tween_callback(func(): get_parent()._update_beam())
+	_tween.tween_callback(func():
+		var main: Node = get_tree().current_scene
+		if main != null and main.has_method("_update_beam"):
+			main._update_beam()
+	)
 
 func reset() -> void:
 	if _tween:
@@ -52,8 +56,7 @@ func reset() -> void:
 	sprite.scale = Vector2.ONE
 
 func get_beam_point() -> Vector2:
-	# Visual center of the sprite in world space
-	return global_position + sprite.position + Vector2(16.0, 16.0)
+	return global_position + sprite.position + Vector2(TILE_SIZE * 0.5, TILE_SIZE * 0.5)
 
 func _grid_to_world(gp: Vector2i) -> Vector2:
-	return Vector2(gp.x * TILE_SIZE + TILE_SIZE / 2, gp.y * TILE_SIZE + TILE_SIZE / 2)
+	return Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE)

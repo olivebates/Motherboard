@@ -2,7 +2,7 @@ extends Node2D
 
 const TILE_SIZE := 32
 const SLIDE_DURATION := 0.15
-const SPRITE_OFFSET := Vector2(-16.0, -16.0)
+const SPRITE_OFFSET := Vector2.ZERO
 
 @export var start_grid_pos: Vector2i = Vector2i(0, 0)
 
@@ -50,4 +50,4 @@ func reset() -> void:
 	sprite.scale = Vector2.ONE
 
 func _grid_to_world(gp: Vector2i) -> Vector2:
-	return Vector2(gp.x * TILE_SIZE + TILE_SIZE / 2, gp.y * TILE_SIZE + TILE_SIZE / 2)
+	return Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE)
