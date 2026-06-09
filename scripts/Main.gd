@@ -31,6 +31,7 @@ func _ready() -> void:
 	room_entry_positions[Vector2i(0, 0)] = Vector2i(2, 2)
 	reset_effect = ResetEffectScene.new()
 	add_child(reset_effect)
+	reset_effect.color = modulate
 	camera.position = _room_center(Vector2i(0, 0))
 	GameManager.shake_requested.connect(_trigger_shake)
 	queue_redraw()
@@ -134,8 +135,10 @@ func can_push_block_to(grid_pos: Vector2i) -> bool:
 		return false
 	return true
 
-func get_push_block_at_face(player_rect: Rect2, dir: Vector2i) -> Node:
+func get_push_block_at_face(player_rect: Rect2, dir: Vector2i, from_point: Vector2) -> Node:
 	const FACE_EPS := 0.1
+	var closest: Node = null
+	var closest_dist := INF
 	for block in get_tree().get_nodes_in_group("push_blocks"):
 		var block_rect: Rect2 = block.get_collision_rect()
 		if dir.x > 0:
@@ -152,8 +155,11 @@ func get_push_block_at_face(player_rect: Rect2, dir: Vector2i) -> Node:
 		var aligned := _rects_overlap_y(player_rect, block_rect) if dir.x != 0 else _rects_overlap_x(player_rect, block_rect)
 		if not aligned:
 			continue
-		return block
-	return null
+		var dist := from_point.distance_squared_to(block_rect.get_center())
+		if dist < closest_dist:
+			closest_dist = dist
+			closest = block
+	return closest
 
 func _rects_overlap_x(a: Rect2, b: Rect2) -> bool:
 	return a.position.x < b.end.x and b.position.x < a.end.x
@@ -340,8 +346,3 @@ func _world_to_grid(world_pos: Vector2) -> Vector2i:
 		floori((world_pos.x - WORLD_OFFSET) / TILE_SIZE),
 		floori((world_pos.y - WORLD_OFFSET) / TILE_SIZE)
 	)
-
-func _draw() -> void:
-	var floor_color := Color(0.0, 0.0, 0.0)
-	draw_rect(Rect2(Vector2.ZERO, Vector2(ROOM_PIXEL_WIDTH, ROOM_PIXEL_HEIGHT)), floor_color)
-	draw_rect(Rect2(Vector2(ROOM_PIXEL_WIDTH, 0.0), Vector2(ROOM_PIXEL_WIDTH, ROOM_PIXEL_HEIGHT)), floor_color)

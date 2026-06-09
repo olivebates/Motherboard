@@ -168,7 +168,7 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node) -> bool:
 	if dir.y != 0 and moved_y:
 		return false
 
-	var block: Node = main.get_push_block_at_face(_hitbox_rect(position), dir)
+	var block: Node = main.get_push_block_at_face(_hitbox_rect(position), dir, _sprite_center())
 	if block == null:
 		return false
 
@@ -180,6 +180,12 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node) -> bool:
 	_start_push_lock(dir)
 	main._trigger_shake(0.8)
 	return true
+
+func _sprite_center() -> Vector2:
+	var spr := $Sprite2D as Sprite2D
+	if spr.texture:
+		return global_position + spr.position + spr.texture.get_size() * 0.5
+	return global_position
 
 func _is_movement_locked_on_axis(is_x: bool, delta_axis: float) -> bool:
 	if _push_lock_dir == Vector2i.ZERO or delta_axis == 0.0:

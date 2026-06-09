@@ -2,6 +2,8 @@ extends Node2D
 
 @export var id: String = ""
 
+const ANIM_DURATION := 0.15
+
 var is_open := false
 var _door_tween: Tween = null
 
@@ -28,14 +30,33 @@ func set_open(open: bool) -> void:
 	is_open = open
 	if _door_tween:
 		_door_tween.kill()
+
 	if open:
 		GameManager.shake_requested.emit(5.0)
 		sprite.visible = true
-		sprite.modulate = Color(3.0, 3.0, 3.0, 1.0)
+		sprite.modulate = Color.WHITE
+		_apply_shrink_scale(1.0)
 		_door_tween = create_tween()
-		_door_tween.tween_interval(0.1)
-		_door_tween.tween_callback(func():
-			sprite.visible = false
-		)
+		_door_tween.tween_method(_apply_shrink_scale, 1.0, 0.0, ANIM_DURATION)
+		_door_tween.tween_callback(_on_open_finished)
 	else:
+		sprite.modulate = Color.WHITE
 		sprite.visible = true
+		_apply_shrink_scale(0.0)
+		_door_tween = create_tween()
+		_door_tween.tween_method(_apply_shrink_scale, 0.0, 1.0, ANIM_DURATION)
+
+func _on_open_finished() -> void:
+	sprite.visible = false
+	sprite.modulate = Color.WHITE
+	_apply_shrink_scale(1.0)
+
+func _apply_shrink_scale(s: float) -> void:
+	var half := _sprite_half_size()
+	sprite.scale = Vector2(s, s)
+	sprite.position = half * (1.0 - s)
+
+func _sprite_half_size() -> Vector2:
+	if sprite.texture:
+		return sprite.texture.get_size() * 0.5
+	return Vector2(16.0, 16.0)

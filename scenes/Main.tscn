@@ -32,6 +32,7 @@ terrain_set_0/terrain_0/color = Color(0.5, 0.34375, 0.25, 1)
 sources/1 = SubResource("TileSetAtlasSource_cvmbd")
 
 [node name="Main" type="Node2D"]
+modulate = Color(0.72629213, 0.46112132, 0.2747976, 1)
 script = ExtResource("1_main")
 
 [node name="Camera2D" type="Camera2D" parent="."]
@@ -63,7 +64,8 @@ position = Vector2(480, 160)
 position = Vector2(512, 160)
 
 [node name="TitleScreenWip" type="Sprite2D" parent="."]
-position = Vector2(416, 128)
+position = Vector2(400, 160)
+scale = Vector2(2, 2)
 texture = ExtResource("10_lhr70")
 
 [node name="FloorPanel" parent="." instance=ExtResource("5_panel")]

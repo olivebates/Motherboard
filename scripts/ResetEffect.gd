@@ -6,6 +6,8 @@ signal done
 const FADE_IN := 0.28
 const FADE_OUT := 0.22
 
+var color: Color = Color.WHITE
+
 var _rect: ColorRect
 var _mat: ShaderMaterial
 var _tween: Tween
@@ -17,6 +19,7 @@ shader_type canvas_item;
 uniform float progress : hint_range(0.0, 1.0) = 0.0;
 uniform float noise_time = 0.0;
 uniform float noise_seed = 0.0;
+uniform vec3 tint_color = vec3(1.0, 1.0, 1.0);
 
 float rand(vec2 co) {
 	return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
@@ -48,7 +51,7 @@ void fragment() {
 
 	float intensity = noise * 0.72 + scan * 0.14 + bright_bar;
 	intensity = min(intensity, 1.0);
-	COLOR = vec4(vec3(intensity * 0.88 + 0.12), envelope);
+	COLOR = vec4(vec3(intensity * 0.88 + 0.12) * tint_color, envelope);
 }
 """
 
@@ -72,6 +75,7 @@ func play() -> void:
 	_mat.set_shader_parameter("progress", 0.0)
 	_mat.set_shader_parameter("noise_time", _time)
 	_mat.set_shader_parameter("noise_seed", randf() * 1000.0)
+	_mat.set_shader_parameter("tint_color", Vector3(color.r, color.g, color.b))
 	_rect.visible = true
 	if _tween:
 		_tween.kill()

@@ -30,10 +30,7 @@ func key_collected() -> void:
 func _open() -> void:
 	_opened = true
 	remove_from_group("key_doors")
-	var tween := create_tween()
-	tween.tween_property(sprite, "modulate", Color(5.0, 5.0, 5.0, 1.0), 0.05)
-	tween.tween_interval(0.05)
-	tween.tween_callback(func(): sprite.visible = false)
+	sprite.visible = false
 
 func reset() -> void:
 	if _opened:

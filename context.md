@@ -78,7 +78,7 @@ Sprites/
   stake.png                — Prong sprite
   SD_Card_block.png        — PushBlock sprite
   washer_block.png         — Nut sprite
-  locked_door1.png         — Door sprite
+  locked_door1.png         — Door sprite (legacy name; scene uses switch_closed.png)
   switch_open2.png         — PassBlock sprite
   key_file3.png            — Key sprite
   electric_front.png       — ElectricBeam sprite (unused; beam drawn procedurally)
@@ -118,7 +118,7 @@ Sprites/
 **Key constants:** `TILE_SIZE=32`, `WORLD_OFFSET=0`, `CAMERA_MARGIN=Vector2(16,16)`, `CAMERA_TWEEN_DURATION=0.25`
 
 **Key variables:**
-- `@onready var wall_tilemap: TileMapLayer` — assign in inspector; checked by `is_blocked()`
+- `@onready var wall_tilemap: TileMapLayer` — assign in inspector; checked by `_is_static_solid()` / `get_player_blocking_rects()`
 - `current_room: Vector2i`
 - `room_entry_positions: Dictionary`
 - `_shake_amount: float` — camera shake magnitude
@@ -131,22 +131,29 @@ Sprites/
 - `_reset_room()` — locks player → ResetEffect fades in → awaits `peaked` → resets room state → awaits `done` → unlocks player
 - `_transition_to_room(new_room)` — clears prongs instantly, tweens camera 0.25s
 - `check_room_transition(player_grid)` — uses `floori` division to support negative room coordinates
-- `is_blocked(grid_pos)` — checks walls, closed doors, push blocks, lightning blockers, key doors (NOT pass blocks)
+- `tile_rect(grid_pos)` → `Rect2` — 32×32 world rect for a grid tile
+- `_is_static_solid(grid_pos)` — walls, closed doors, lightning blockers, key doors (NOT push blocks, NOT pass blocks)
+- `is_blocked(grid_pos)` — static solids + push blocks (used for grid queries elsewhere)
+- `get_player_blocking_rects(area)` → `Array[Rect2]` — static tile rects + push-block rects overlapping `area`; used by player AABB movement
+- `can_push_block_to(grid_pos)` — false if static solid, push block, or pass block occupies tile
+- `get_push_block_at_face(player_rect, dir, from_point)` → `Node` — among push blocks flush against `player_rect` on the given face, returns the one whose center is closest to `from_point`
 - `has_pass_block_at(grid_pos)` — checks pass_blocks group
 - `get_push_block_at(grid_pos)` → Node or null
 
 ---
 
 ### Player.gd (Node2D)
-**Purpose:** Free pixel-based movement and input.
+**Purpose:** Free pixel-based movement, push input, and prong placement.
 
-**Constants:** `SPEED=320 px/s`, `SPRITE_SPEED=20.0`
+**Constants:** `SPEED=272 px/s`, `SPRITE_SPEED=20.0`, `CONTACT_EPS=0.1`, `PUSH_FREEZE=0.15`
 
 **Hitbox:** Defined by a `CollisionShape2D` child node named `Hitbox` with a `RectangleShape2D` shape. Size and offset are read in `_ready()` from the node — edit in the Godot editor to change collision dimensions. At runtime: `_half_w`, `_half_h`, `_hitbox_offset` store the derived values. Currently 10×10, offset (0, 11).
 
-**Movement:** Input → normalized velocity → axis-separated collision (X then Y, no coupling) → move if clear → `check_room_transition`. Squash/stretch: `(1.15, 0.85)` or `(0.85, 1.15)` on dominant axis. `_is_position_blocked` checks 4 corners of the hitbox rect against `Main.is_blocked()`.
+**Movement (AABB collision):** Input → normalized velocity → axis-separated movement (X then Y). Each axis uses `_move_axis_x` / `_move_axis_y` to clamp motion against `Main.get_player_blocking_rects()` so the hitbox stops exactly at solid edges (walls, doors, blockers, key doors, push blocks). Squash/stretch: `(1.15, 0.85)` or `(0.85, 1.15)` on dominant axis. Pass blocks are not solids for the player.
 
-**Push detection (separate from movement):** Every frame while holding a direction, `_check_push(input)` tests the player's current hitbox rect (`_player_hitbox_rect(position)`) against the directional `Area2D` nodes on each push block in the `"push_blocks"` group. Direction → face area mapping: right→`Area2DLeft`, left→`Area2DRight`, down→`Area2DUp`, up→`Area2DDown`. Area rects are computed via `_area_rect(area)` which subtracts `(16, 16)` from `area.global_position` to compensate for the block's runtime position being tile-center while the areas were authored at tile-top-left in the editor. Push fires if the destination tile is clear; triggers `_trigger_shake(0.8)` and a 0.1s `_push_locked` cooldown.
+**Push detection:** Runs after movement each frame. Requires a single cardinal key (no diagonals). Player must be stopped on the push axis (`moved_x`/`moved_y` false for that axis) with hitbox flush against a push-block face (`FACE_EPS=0.1`). If multiple blocks qualify, `Main.get_push_block_at_face()` picks the one closest to the player sprite center (`_sprite_center()`). Destination must pass `can_push_block_to()`. On success: `block.push(dir)`, camera shake (0.8), and a directional push lock for `PUSH_FREEZE` seconds — only movement and re-push in the same direction are blocked; perpendicular movement is allowed immediately.
+
+**Key functions:** `_hitbox_rect(pos)`, `_sprite_center()`, `_try_push()`, `_is_movement_locked_on_axis()`, `_start_push_lock(dir)`
 
 ---
 
@@ -158,7 +165,7 @@ Sprites/
 ---
 
 ### Nut.gd (Node2D)
-**Purpose:** Pushable conductor. Identical push/reset behaviour to PushBlock but also in `"nuts"` group. After its slide tween finishes, calls `Main._update_beam()`. `get_beam_point()` returns visual sprite center for beam routing.
+**Purpose:** Pushable conductor. Identical push/reset behaviour to PushBlock but also in `"nuts"` group. After its slide tween finishes, calls `Main._update_beam()`. `get_beam_point()` returns visual sprite center for beam routing. `get_collision_rect()` → 32×32 world `Rect2` for player collision/push queries.
 
 ---
 
@@ -166,6 +173,7 @@ Sprites/
 **Purpose:** Instantly teleports one tile when pushed; sprite slides to simulate smooth movement.
 
 - `_ready()` — infers `start_grid_pos` from editor placement position (like Nut); no need to set export manually
+- `get_collision_rect()` → 32×32 world `Rect2` for player collision/push queries
 - `push(direction)` — teleports node, slides sprite from old position
 - `reset()` — restores `start_grid_pos`, snaps sprite
 
@@ -192,7 +200,7 @@ Sprites/
 
 ### Door.gd (Node2D)
 - `@export var id: String` — matches FloorPanel IDs
-- `set_open(open)` — on open: emits `GameManager.shake_requested(5.0)`, flashes white then hides sprite; on close: instantly restores sprite with no flash
+- `set_open(open)` — on open: emits `GameManager.shake_requested(5.0)`, brief white flash, then shrinks sprite toward its center over `ANIM_DURATION=0.15s` (scale + position compensated via `_apply_shrink_scale`) and hides; on close: starts at scale 0 centered, grows back to full size over 0.15s
 - Added to group `"doors"`
 
 ---
@@ -269,10 +277,10 @@ Prong.tscn:
 PushBlock.tscn:
   Node2D [PushBlock.gd]
   ├── Sprite2D [SD_Card_block.png, centered=false]
-  ├── Area2DLeft  [Area2D] → CollisionShapeLeft  [CollisionShape2D] — left-face push zone
-  ├── Area2DRight [Area2D] → CollisionShapeRight [CollisionShape2D] — right-face push zone
-  ├── Area2DUp    [Area2D] → CollisionShapeUp    [CollisionShape2D] — top-face push zone
-  └── Area2DDown  [Area2D] → CollisionShapeDown  [CollisionShape2D] — bottom-face push zone
+  ├── Area2DLeft  [Area2D] → CollisionShapeLeft  [CollisionShape2D] — legacy; push uses AABB collision
+  ├── Area2DRight [Area2D] → CollisionShapeRight [CollisionShape2D]
+  ├── Area2DUp    [Area2D] → CollisionShapeUp    [CollisionShape2D]
+  └── Area2DDown  [Area2D] → CollisionShapeDown  [CollisionShape2D]
 
 ElectricBeam.tscn:
   Node2D [ElectricBeam.gd]
@@ -281,7 +289,7 @@ ElectricBeam.tscn:
 
 Door.tscn:
   Node2D [Door.gd]
-  └── Sprite2D [locked_door1.png, centered=false]
+  └── Sprite2D [switch_closed.png, centered=false]
 
 FloorPanel.tscn:
   Node2D [FloorPanel.gd]
@@ -306,7 +314,7 @@ PassBlock.tscn:
 Nut.tscn:
   Node2D [Nut.gd]
   ├── Sprite2D [washer_block.png, centered=false]
-  ├── Area2DLeft  [Area2D] → CollisionShapeLeft  [CollisionShape2D]
+  ├── Area2DLeft  [Area2D] → CollisionShapeLeft  [CollisionShape2D] — legacy; push uses AABB collision
   ├── Area2DRight [Area2D] → CollisionShapeRight [CollisionShape2D]
   ├── Area2DUp    [Area2D] → CollisionShapeUp    [CollisionShape2D]
   └── Area2DDown  [Area2D] → CollisionShapeDown  [CollisionShape2D]
@@ -323,7 +331,7 @@ All objects use `centered = false`.
 | Player | (player sprite) | tile center |
 | Prong | stake.png | exact pixel (placed by player) |
 | PushBlock | SD_Card_block.png | tile center (inferred from editor placement) |
-| Door | locked_door1.png | tile top-left |
+| Door | switch_closed.png | tile top-left |
 | FloorPanel | positive.png / negative.png | tile top-left |
 | LightningBlocker | resistor_small.png / resistor_small2.png | tile top-left |
 | Nut | washer_block.png | tile center |
@@ -392,10 +400,13 @@ Room transition (player walks to edge):
 | Prong pop animation (scale 0→1.3→1) | Prong.gd `setup()` |
 | Prong clear animation (shrink to top-center) | Main.gd `spawn_prong()` |
 | Push block sprite slide | PushBlock.gd `push()` |
+| Push directional freeze (0.15s, push axis only) | Player.gd `_start_push_lock()` |
+| Closest-block push selection | Main.gd `get_push_block_at_face()` |
 | Beam thickness pulse | ElectricBeam.gd `_rebuild_points()` |
 | Beam endpoint glow dots | ElectricBeam.gd `_draw()` |
 | Pixelated beam (no anti-alias) | ElectricBeam.gd `_ready()` |
-| Door flash on open | Door.gd `set_open()` |
+| Door flash + shrink-to-center on open | Door.gd `set_open()` |
+| Door grow-from-center on close | Door.gd `set_open()` |
 | Floor panel circle outline when active | FloorPanel.gd `_draw()` |
 | Blocker texture alternation when blocking | LightningBlocker.gd `_draw()` |
 | Blocker spark animation | LightningBlocker.gd `_draw()` |
