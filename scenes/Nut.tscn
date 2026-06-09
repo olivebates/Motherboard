@@ -1,0 +1,38 @@
+[gd_scene load_steps=4 format=3 uid="uid://c8xg8wfwf8k2v"]
+
+[ext_resource type="Script" uid="uid://grdb180v2p5b" path="res://scripts/Nut.gd" id="1_nut"]
+[ext_resource type="Texture2D" uid="uid://ccm7tamrraan5" path="res://Sprites/washer_block.png" id="2_wymcd"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wymcd"]
+size = Vector2(32, 33)
+
+[node name="Nut" type="Node2D"]
+script = ExtResource("1_nut")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_wymcd")
+centered = false
+
+[node name="Area2DLeft" type="Area2D" parent="."]
+
+[node name="CollisionShapeLeft" type="CollisionShape2D" parent="Area2DLeft"]
+position = Vector2(15.5, 16)
+shape = SubResource("RectangleShape2D_wymcd")
+
+[node name="Area2DRight" type="Area2D" parent="."]
+
+[node name="CollisionShapeRight" type="CollisionShape2D" parent="Area2DRight"]
+position = Vector2(16.5, 16)
+shape = SubResource("RectangleShape2D_wymcd")
+
+[node name="Area2DUp" type="Area2D" parent="."]
+
+[node name="CollisionShapeUp" type="CollisionShape2D" parent="Area2DUp"]
+position = Vector2(16, 15.5)
+shape = SubResource("RectangleShape2D_wymcd")
+
+[node name="Area2DDown" type="Area2D" parent="."]
+
+[node name="CollisionShapeDown" type="CollisionShape2D" parent="Area2DDown"]
+position = Vector2(16, 16.5)
+shape = SubResource("RectangleShape2D_wymcd")

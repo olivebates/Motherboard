@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://b00000005"]
+
+[ext_resource type="Script" uid="uid://dkwp4068g5xa1" path="res://scripts/Door.gd" id="1_door"]
+[ext_resource type="Texture2D" uid="uid://cqy3tgp2ponqn" path="res://Sprites/switch_closed.png" id="2_eyv6f"]
+
+[node name="Door" type="Node2D"]
+script = ExtResource("1_door")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_eyv6f")
+centered = false
