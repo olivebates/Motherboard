@@ -3,11 +3,17 @@ extends Node2D
 const TILE_SIZE := 32
 const SLIDE_DURATION := 0.15
 const SPRITE_OFFSET := Vector2.ZERO
+const HIGHLIGHT_COLOR := Color.WHITE
+const HIGHLIGHT_LINE_WIDTH := 1.5
+# Border oscillates ±1 px around this base offset from the block edge
+const HIGHLIGHT_BASE_OFFSET := 3.0
 
 @export var start_grid_pos: Vector2i = Vector2i(0, 0)
 
 var grid_pos: Vector2i = Vector2i.ZERO
 var _tween: Tween = null
+var _highlighted := false
+var _highlight_time := 0.0
 
 @onready var sprite: Sprite2D = $Sprite2D
 
@@ -19,6 +25,25 @@ func _ready() -> void:
 	sprite.centered = false
 	sprite.position = SPRITE_OFFSET
 
+func _process(delta: float) -> void:
+	if _highlighted:
+		_highlight_time += delta
+		queue_redraw()
+
+func _draw() -> void:
+	if not _highlighted:
+		return
+	# Oscillate offset by 1px each second using a triangle wave
+	var offset := HIGHLIGHT_BASE_OFFSET + sin(_highlight_time * PI) * 1.0
+	var rect := Rect2(-offset, -offset, float(TILE_SIZE) + offset * 2.0, float(TILE_SIZE) + offset * 2.0)
+	draw_rect(rect, HIGHLIGHT_COLOR, false, HIGHLIGHT_LINE_WIDTH)
+
+func set_highlight(val: bool) -> void:
+	_highlighted = val
+	if not val:
+		_highlight_time = 0.0
+	queue_redraw()
+
 func get_collision_rect() -> Rect2:
 	return Rect2(
 		grid_pos.x * TILE_SIZE,
@@ -28,6 +53,9 @@ func get_collision_rect() -> Rect2:
 	)
 
 func push(direction: Vector2i) -> void:
+	if _highlighted:
+		_clear_all_highlights()
+
 	var old_world := _grid_to_world(grid_pos)
 	grid_pos += direction
 	var new_world := _grid_to_world(grid_pos)
@@ -41,6 +69,11 @@ func push(direction: Vector2i) -> void:
 	_tween.set_trans(Tween.TRANS_SINE)
 	_tween.tween_property(sprite, "position", SPRITE_OFFSET, SLIDE_DURATION)
 
+func _clear_all_highlights() -> void:
+	for b in get_tree().get_nodes_in_group("push_blocks"):
+		if b.has_method("set_highlight"):
+			b.set_highlight(false)
+
 func reset() -> void:
 	if _tween:
 		_tween.kill()
@@ -48,6 +81,7 @@ func reset() -> void:
 	position = _grid_to_world(grid_pos)
 	sprite.position = SPRITE_OFFSET
 	sprite.scale = Vector2.ONE
+	set_highlight(false)
 
 func _grid_to_world(gp: Vector2i) -> Vector2:
 	return Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE)

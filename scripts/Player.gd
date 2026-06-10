@@ -7,6 +7,9 @@ const SPRITE_SPEED := 20.0
 const CONTACT_EPS := 0.1
 const PUSH_FREEZE := 0.15
 
+@export var start_with_push: bool = false
+@export var start_with_chain: bool = false
+
 var movement_locked := false
 var visual_pos: Vector2
 var _push_lock_dir := Vector2i.ZERO
@@ -38,6 +41,11 @@ func _ready() -> void:
 	_body_offset = YSortHitboxBottom.body_offset_from_hitbox(_hitbox_offset, _half_h)
 	_body.position = _body_offset
 	visual_pos = position + _body_offset
+	if start_with_push:
+		GameManager.grant_ability("push")
+	if start_with_chain:
+		GameManager.grant_ability("chain")
+	eject_from_solid()
 
 func get_body_center() -> Vector2:
 	return YSortHitboxBottom.hitbox_center_from_root(position, _body_offset, _hitbox_offset)
@@ -246,3 +254,36 @@ func unlock_movement() -> void:
 func reset_to(gp: Vector2i) -> void:
 	position = _grid_to_world(gp)
 	visual_pos = position + _body_offset
+
+func _is_inside_solid() -> bool:
+	var rect := _hitbox_rect(position)
+	for solid in _main.get_player_blocking_rects(rect):
+		if rect.intersects(solid):
+			return true
+	return false
+
+func eject_from_solid() -> void:
+	if not _is_inside_solid():
+		return
+	var origin := grid_pos
+	var visited := {}
+	var queue: Array[Vector2i] = [origin]
+	visited[origin] = true
+	while queue.size() > 0:
+		var gp: Vector2i = queue.pop_front()
+		var candidate := _grid_to_world(gp)
+		var rect := _hitbox_rect(candidate)
+		var blocked := false
+		for solid in _main.get_player_blocking_rects(rect):
+			if rect.intersects(solid):
+				blocked = true
+				break
+		if not blocked:
+			position = candidate
+			visual_pos = position + _body_offset
+			return
+		for d in [Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1)]:
+			var next = gp + d
+			if not visited.has(next):
+				visited[next] = true
+				queue.append(next)

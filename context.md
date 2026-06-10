@@ -43,7 +43,7 @@ Godot Y-sorts by each node's `position.y` (higher Y = drawn in front). Walls use
 - At startup, gameplay nodes in `Y_SORT_GROUPS` are reparented under `Walls` (global transform preserved) so they sort in the same pass as wall tiles
 - New prongs are spawned as children of `wall_tilemap` directly
 
-**`Y_SORT_GROUPS`:** `players`, `prongs`, `doors`, `lightning_blockers`, `key_doors`, `push_blocks`, `pass_blocks`, `keys`
+**`Y_SORT_GROUPS`:** `players`, `prongs`, `doors`, `lightning_blockers`, `key_doors`, `push_blocks`, `pass_blocks`, `keys`, `teleport_panels`
 
 **Depth rule:** compare actor **hitbox bottom** vs solid **tile top**.
 - Hitbox bottom below tile top (larger Y) → actor in front
@@ -76,36 +76,43 @@ scenes/
   Door.tscn                — Puzzle door (floor-panel activated)
   FloorPanel.tscn          — Floor trigger (positive.png or negative.png sprite)
   LightningBlocker.tscn    — Blocks the electric beam; resistor_small.png sprite
-  Nut.tscn                 — Pushable conductor; beam routes through it
+  Nut.tscn                 — Pushable conductor; beam routes through it when chain ability active
+  Screw.tscn               — Static conductor; like Nut but cannot be pushed
   KeyDoor.tscn             — Solid door that opens when all Keys in the room are collected
   Key.tscn                 — Collectible that unlocks the KeyDoor in the same room
   PassBlock.tscn           — Passable block; player walks through, push blocks cannot enter
   AbilityPickup.tscn       — Ability unlock pickup (white circle); exports: ability, message
   AbilityGate.tscn         — Object hidden until a required ability is unlocked; TAB.png sprite
+  TeleportPanel.tscn       — Interactive teleport panel; closed=solid, open=passable; exports: panel_name, one_way
+  OnewayPanel.tscn         — TeleportPanel with one_way=true pre-set; player can teleport from it but not to it
 
 scripts/
   GameManager.gd           — Autoload singleton (puzzle state + ability tracking)
   Main.gd                  — Root scene controller
-  Player.gd                — Player movement and input
+  Player.gd                — Player movement and input; exports start_with_push, start_with_chain
   Prong.gd                 — Prong placement logic
   PushBlock.gd             — Push block with sprite-lag animation
   ElectricBeam.gd          — Animated electricity beam (white, no transparency)
   Door.gd                  — Door open/close logic
-  FloorPanel.gd            — Floor panel registration + circle-outline highlight
+  FloorPanel.gd            — Floor panel registration + circle-outline highlight + pulsing border highlight
   LightningBlocker.gd      — Lightning blocker; alternates textures when active
   WallTileMap.gd           — TileMapLayer script for painting walls in-editor
   ResetEffect.gd           — CRT static CanvasLayer effect for room reset
-  KeyDoor.gd               — Solid door; counts Keys in same room, opens when all collected
+  KeyDoor.gd               — Solid door; counts Keys in same room, opens with shrink-to-center animation
   Key.gd                   — Collectible; shrinks to center on pickup, notifies KeyDoor
-  Nut.gd                   — Pushable conductor; beam routes through it
+  Nut.gd                   — Pushable conductor; beam routes through it when chain ability active
+  Screw.gd                 — Static conductor; beam routes through it when chain ability active; cannot be pushed
   PassBlock.gd             — Passthrough block; solid to push blocks, transparent to player
   SplashScreen.gd          — Launch splash; black bg + credit text, dismissed by any key
   YSortHitboxBottom.gd     — Hitbox-bottom Y-sort helpers (Player, Prong)
-  MapOverlay.gd            — Map overlay UI (TAB to open; cursor restricted to visited rooms)
-  TeleportAnchor.gd        — Room teleport anchor markers
-  AbilityPickup.gd         — Pickup that grants an ability and shows a dismissable message
+  MapOverlay.gd            — Map overlay UI (TAB to open); slides in/out from top; teleport mode requires push ability
+  TeleportAnchor.gd        — Room teleport anchor markers (legacy fallback; TeleportPanel is now the primary teleport mechanic)
+  TeleportPanel.gd         — Interactive teleport panel; closed=solid (player pushes 0.2s to open); open=passable floor; screenshake on open; exports panel_name (shown on map) and one_way (excludes from destinations)
+  OnewayPanel.gd           — (uses TeleportPanel.gd) TeleportPanel with one_way=true; source-only teleporter
+  AbilityPickup.gd         — Pickup that grants an ability and triggers the ability intro via AbilityTutorial
   AbilityMessage.gd        — CanvasLayer message overlay (layer 25); prompt appears after 2s
   AbilityGate.gd           — Node2D that hides its sprite until required_ability is granted
+  AbilityTutorial.gd       — Autoload singleton; plays per-ability intro animations (sphere arcs, block/panel highlights)
 
 Sprites/
   placeholder.png          — 32×32 RGBA placeholder
@@ -122,6 +129,8 @@ Sprites/
   electric_front.png       — ElectricBeam sprite (unused; beam drawn procedurally)
   wall1.png                — Wall tile sprite
   TAB.png                  — AbilityGate sprite
+  teleport_closed.gif      — TeleportPanel closed/solid sprite
+  teleport_open.png        — TeleportPanel open/passable sprite
 ```
 
 ---
@@ -165,12 +174,10 @@ Sprites/
 - `current_room: Vector2i`
 - `room_entry_positions: Dictionary`
 - `_shake_amount: float` — camera shake magnitude
-
-**Key variables:**
 - `ability_message: Node` — `AbilityMessage` CanvasLayer instance; exposed for `AbilityPickup` to call `show_message()`
 
 **Key functions:**
-- `_setup_y_sort_children()` — enables Y-sort on `Walls`, reparents `Y_SORT_GROUPS` nodes under `wall_tilemap`
+- `_setup_y_sort_children()` — enables Y-sort on `Walls`, reparents `Y_SORT_GROUPS` nodes under `wall_tilemap`. Screws are NOT in `Y_SORT_GROUPS` and are not reparented; they are static solids checked via `_is_static_solid()` using the `"screws"` group
 - `_process(delta)` — shake decay → `camera.offset`
 - `_trigger_shake(strength)` — sets `_shake_amount`; connected to `GameManager.shake_requested`
 - `_update_beam()` — checks blockers, sets `GameManager.beam_blocked`, calls `evaluate_puzzle()`, activates/deactivates beam
@@ -179,14 +186,21 @@ Sprites/
 - `_transition_to_room(new_room)` — clears prongs instantly, tweens camera 0.25s
 - `check_room_transition(player_grid, player_pixel)` — uses `floori` division; downward and rightward transitions require player pixel position to be 24px past the boundary before firing
 - `tile_rect(grid_pos)` → `Rect2` — 32×32 world rect for a grid tile
-- `_is_static_solid(grid_pos)` — walls, closed doors, lightning blockers, key doors (NOT push blocks, NOT pass blocks)
+- `_is_static_solid(grid_pos)` — walls, closed doors, lightning blockers, key doors, closed teleport panels, screws (NOT push blocks, NOT pass blocks)
 - `is_blocked(grid_pos)` — static solids + push blocks (used for grid queries elsewhere)
+- `can_teleport_from_panel()` → `bool` — true if player is on an open panel, at least 2 total open panels exist (including one-ways), and at least one non-one-way destination exists; used for TAB prompt and teleport mode activation
+- `get_open_teleport_panel_rooms()` — returns rooms with open non-one-way TeleportPanels (destinations only)
 - `get_player_blocking_rects(area)` → `Array[Rect2]` — static tile rects + push-block rects overlapping `area`; used by player AABB movement
 - `can_push_block_to(grid_pos)` — false if static solid, push block, or pass block occupies tile
 - `get_push_block_at_face(player_rect, dir, from_point)` → `Node` — among push blocks flush against `player_rect` on the given face, returns the one whose center is closest to `from_point`
 - `has_pass_block_at(grid_pos)` — checks pass_blocks group
 - `get_push_block_at(grid_pos)` → Node or null
 - `_find_nearest_open_tile(start)` — BFS for nearest unblocked tile; uses `is_blocked` (includes push blocks)
+- `is_player_on_active_teleport_panel()` → `bool` — true if player hitbox overlaps any open TeleportPanel
+- `get_open_teleport_panel_rooms()` → `Array` — list of room coords that contain an open TeleportPanel
+- `_get_open_panel_for_room(room)` → `Node` — finds the open TeleportPanel in a given room (used by `_on_teleport_requested`)
+- `_on_teleport_requested(room)` — teleports to the open TeleportPanel in target room; falls back to TeleportAnchor if none
+- `_update_tab_label()` — shows "TAB" Label above player sprite when on open panel with ≥2 open panels; color matches `modulate`; position tracks `player.visual_pos`
 
 ---
 
@@ -202,6 +216,8 @@ Sprites/
 **Movement (AABB collision):** Root `position` is hitbox bottom. `_hitbox_rect(pos)` = `pos + _body_offset + _hitbox_offset`. Axis-separated movement against `Main.get_player_blocking_rects()`. Squash/stretch on dominant axis. Pass blocks are not solids.
 
 **Push detection:** After movement; single cardinal input; flush against push-block face. Closest block by `_sprite_center()`. On success: `block.push(dir)`, shake (0.8), `PUSH_FREEZE` axis lock. Push is **gated** by `GameManager.has_ability("push")` — no pushing until that ability is acquired.
+
+**Startup ability grants:** `@export var start_with_push: bool` and `@export var start_with_chain: bool` — if true, the corresponding ability is granted via `GameManager.grant_ability()` in `_ready()` without requiring a pickup.
 
 **Key functions:** `get_body_center()` → hitbox center world pos; `_hitbox_rect(pos)`, `_sprite_center()`, `_grid_to_world()` / `_world_to_grid()`, `reset_to(gp)`, `_try_push()`, `_start_push_lock(dir)`
 
@@ -219,7 +235,12 @@ Sprites/
 ---
 
 ### Nut.gd (Node2D)
-**Purpose:** Pushable conductor. Identical push/reset behaviour to PushBlock (tile top-left node, `SPRITE_OFFSET = (0, 0)`) but also in `"nuts"` group. After slide tween, calls `Main._update_beam()` via `get_tree().current_scene`. `get_beam_point()` returns sprite center. `get_collision_rect()` → 32×32 world `Rect2`.
+**Purpose:** Pushable conductor. Identical push/reset behaviour to PushBlock (tile top-left node, `SPRITE_OFFSET = (0, 0)`) but also in `"nuts"` group. After slide tween, calls `Main._update_beam()` via `get_tree().current_scene`. `get_beam_point()` returns sprite center. `get_collision_rect()` → 32×32 world `Rect2`. Beam routes through Nuts only when `GameManager.has_ability("chain")`.
+
+---
+
+### Screw.gd (Node2D)
+**Purpose:** Static conductor. Like Nut but cannot be pushed. In `"nuts"` group (beam routes through it when chain ability is acquired) and `"screws"` group (used by `Main._is_static_solid()` to block player and push blocks). Has `get_grid_pos()`, `get_beam_point()`, `get_collision_rect()`, `reset()`. Does NOT have a `push()` method and is NOT in `"push_blocks"` group.
 
 ---
 
@@ -229,8 +250,11 @@ Sprites/
 - Node at **tile top-left**; `SPRITE_OFFSET = (0, 0)`; `_grid_to_world(gp)` → `(gp.x * 32, gp.y * 32)`
 - `_ready()` — infers `start_grid_pos` from editor placement, snaps to tile top-left
 - `get_collision_rect()` → 32×32 world `Rect2` for player collision/push queries
-- `push(direction)` — teleports node, slides sprite from old position
-- `reset()` — restores `start_grid_pos`, snaps sprite
+- `push(direction)` — teleports node, slides sprite from old position; if highlighted, clears all highlights first
+- `reset()` — restores `start_grid_pos`, snaps sprite, clears highlight
+- `set_highlight(val)` — enables/disables the pulsing white border drawn via `_draw()`
+- `_draw()` — when highlighted, draws an unfilled white rectangle around the block with a ±1px oscillating offset (`sin(time * PI)`, one cycle/s)
+- `_clear_all_highlights()` — iterates `"push_blocks"` group; guards with `has_method("set_highlight")` to safely skip Nut nodes
 
 ---
 
@@ -264,9 +288,11 @@ Sprites/
 ### FloorPanel.gd (Node2D)
 - `@export var id: String`; `@export var id2: String = ""`; `@export var positive: bool = true`
 - Supports up to two IDs; both registered with `GameManager.register_floor_panel(gp, id, id2)`
+- Added to group `"floor_panels"` in `_ready()`
 - Sprite is hidden; drawn manually via `_draw()` so circle can render on top
-- `_process`: checks if any prong is within `PANEL_ACTIVATION_RADIUS` (24px) of panel center; calls `queue_redraw()` on state change
-- `_draw()`: draws sprite texture, then draws white circle outline (radius 17px) when active
+- `_process`: checks if any prong is within `PANEL_ACTIVATION_RADIUS` (24px) of panel center; calls `queue_redraw()` on state change; ticks `_highlight_time` when highlighted
+- `_draw()`: draws sprite texture; draws white circle outline (radius 17px) when active; draws pulsing white border (same as PushBlock) when highlighted
+- `set_highlight(val)` — enables/disables the pulsing border
 - Registers in GameManager with grid position
 
 ---
@@ -285,8 +311,8 @@ Sprites/
 - No id export — matches keys by room position (`floori(pos / 800 or 384)`)
 - `_count_keys()` — deferred; counts all Keys in the same room
 - `key_collected()` — increments counter; opens when all collected
-- `_open()` — removes from group, flashes white, hides sprite (permanent)
-- `reset()` — if opened, returns immediately; otherwise restores and re-adds to group
+- `_open()` — removes from group, emits `shake_requested(5.0)`, runs shrink-to-center tween (same as Door: scale+position compensated via `_apply_shrink_scale`, `ANIM_DURATION=0.15s`), then hides sprite permanently
+- `reset()` — if opened, returns immediately; kills any in-flight tween, restores sprite scale/position/visibility, re-adds to group
 
 ---
 
@@ -318,9 +344,9 @@ Sprites/
 ### AbilityPickup.gd (Node2D)
 - Group `"ability_pickups"`; positioned at tile top-left like other collectibles
 - `@export var ability: String` — ability name to grant (e.g. `"push"`)
-- `@export var message: String` — text shown in the message overlay on collect
+- `@export var message: String` — text shown in the message overlay on collect (used for non-push abilities)
 - Draws a white filled circle (radius 10px) at `(16, 16)` via `_draw()`; hidden after collect
-- On collect: grants ability via `GameManager.grant_ability()`, sets `room_entry_positions[current_room]` to player's grid pos, locks player, shows `Main.ability_message`
+- On collect: grants ability via `GameManager.grant_ability()`, sets `room_entry_positions[current_room]` to player's grid pos, locks player, calls `AbilityTutorial.play_intro(ability, player, main)`
 - `reset()` — re-shows pickup (does not revoke ability)
 
 ---
@@ -334,10 +360,56 @@ Sprites/
 
 ---
 
+### AbilityTutorial.gd (autoload singleton, Node)
+**Purpose:** Plays per-ability intro animations when an ability pickup is collected. Keeps animation logic decoupled from `AbilityPickup`.
+
+**Key constants:** `ARC_HEIGHT=48`, `SPHERE_DURATION=1.2`, `SPHERE_RADIUS=4`
+
+**Inner class `SphereOverlay` (Node2D):** Temporary node added to the main scene during the push intro. Holds `_spheres: Array` of `{pos: Vector2, done: bool}` entries; draws undone spheres as white circles in `_draw()` via `to_local()`. Freed automatically when all spheres arrive.
+
+**Key functions:**
+- `play_intro(ability, player, main)` — dispatches to the correct intro by ability name; for unknown abilities falls back to `AbilityMessage` overlay
+- `_play_push_intro(player, main)` — freezes player; finds all PushBlocks (with `has_method("set_highlight")` guard to exclude Nuts) in the current room; spawns a `SphereOverlay`; tweens one sphere per block along a parabolic arc (`sin(t*PI)*ARC_HEIGHT`); on each arrival calls `block.set_highlight(true)`; unlocks player and frees overlay when the last sphere lands
+- `_play_chain_intro(player, main)` — same arc animation targeting FloorPanel nodes (group `"floor_panels"`) with `id == "chain1"` in the current room; on arrival calls `panel.set_highlight(true)`; unlocks player when last sphere lands
+
+---
+
 ### AbilityGate.gd (Node2D)
 - `@export var required_ability: String = "push"`
 - Sprite starts hidden; `_process` shows it as soon as `GameManager.has_ability(required_ability)` returns true
 - Uses `TAB.png` sprite (`centered = false`)
+
+---
+
+### TeleportPanel.gd (Node2D)
+- Group `"teleport_panels"`; positioned at tile top-left; in `Y_SORT_GROUPS` so Y-sorted under `Walls`
+- `@export var panel_name: String` — displayed above the cursor room on the map in teleport mode
+- `@export var one_way: bool = false` — if true, excluded from `get_open_teleport_panel_rooms()` (can't be teleported to, only from)
+- `OPEN_HOLD_TIME = 0.2s` — player must push against it continuously to open
+- Closed: solid (included in `_is_static_solid`); draws `teleport_closed.png` via `_draw()`
+- Open: passable; draws `teleport_open.png`; emits `GameManager.shake_requested(8.0)` on open
+- `is_player_standing_on(player)` — true when open and player hitbox overlaps panel rect
+- `get_grid_pos()`, `get_collision_rect()`, `reset()` — standard tile accessors; reset closes the panel
+- Scene has a hidden `Sprite2D` child; drawing is done entirely via `_draw()`
+
+### OnewayPanel (Node2D — uses TeleportPanel.gd)
+- Identical to TeleportPanel but `one_way = true` pre-set in scene data (`scenes/OnewayPanel.tscn`)
+- Player can open and teleport *from* it; it never appears as a destination in the map menu
+
+---
+
+### MapOverlay.gd (CanvasLayer, layer=10)
+**Purpose:** Map/teleport overlay opened by TAB. Slides in/out from the top of the screen (0.15s SINE tween). Mode is determined at open time based on player state.
+
+**Modes:**
+- **Teleport mode** — player is on an open TeleportPanel and at least one non-one-way destination exists (`Main.can_teleport_from_panel()`). Cursor navigates between destination rooms; WASD snaps cursor to nearest destination; Space teleports. Instructions always show "WASD: Move  Space: Teleport  TAB: Close".
+- **Map-only mode** — TAB pressed elsewhere (or no destinations). No cursor, no navigation. Instructions: "TAB: Close"
+
+**Key variables:** `_teleport_mode: bool`, `_open_panel_rooms: Array` (destinations only), `_visited: Dictionary`, `_cursor: Vector2i`, `_slide_tween: Tween`
+
+**Visual style:** Background is a fitted solid-black box with a tint-colored 2px border. Box width expands to fit the widest of: room grid, instruction text, or panel name text. Box top expands upward when a panel name is present. All rooms, connections, and stubs drawn in `Main.modulate` tint. Rooms with an open destination panel show a black dot at center. In teleport mode, cursor room has a 1px tint outline offset 1px outward on all sides (2px extra on right/bottom). Panel name drawn in tint above rooms; instructions in tint below. TAB prompt and teleport mode require ≥2 total open panels (any type) and ≥1 non-one-way destination. Unvisited rooms with open panels are shown on the map. All text uses tint color.
+
+**Connections:** `_has_exit(room, dir)` — checks for at least one non-wall tile on the border; right/down checks the first column/row of the neighbour room. Connections only drawn between visited rooms that have an exit between them.
 
 ---
 
@@ -424,10 +496,26 @@ AbilityGate.tscn:
   Node2D [AbilityGate.gd]
   └── Sprite2D [TAB.png, centered=false, visible=false]
 
+TeleportPanel.tscn:
+  Node2D [TeleportPanel.gd]  ← position at tile top-left; drawing via _draw()
+  └── Sprite2D [centered=false, visible=false — hidden; draw done in _draw()]
+
+OnewayPanel.tscn:
+  Node2D [TeleportPanel.gd, one_way=true]  ← same structure as TeleportPanel
+  └── Sprite2D [centered=false, visible=false]
+
 Nut.tscn:
   Node2D [Nut.gd]
   ├── Sprite2D [washer_block.png, centered=false]
   ├── Area2DLeft  [Area2D] → CollisionShapeLeft  [CollisionShape2D] — legacy; push uses AABB collision
+  ├── Area2DRight [Area2D] → CollisionShapeRight [CollisionShape2D]
+  ├── Area2DUp    [Area2D] → CollisionShapeUp    [CollisionShape2D]
+  └── Area2DDown  [Area2D] → CollisionShapeDown  [CollisionShape2D]
+
+Screw.tscn:
+  Node2D [Screw.gd]
+  ├── Sprite2D [screw.png, centered=false]
+  ├── Area2DLeft  [Area2D] → CollisionShapeLeft  [CollisionShape2D]
   ├── Area2DRight [Area2D] → CollisionShapeRight [CollisionShape2D]
   ├── Area2DUp    [Area2D] → CollisionShapeUp    [CollisionShape2D]
   └── Area2DDown  [Area2D] → CollisionShapeDown  [CollisionShape2D]
@@ -530,6 +618,9 @@ Room transition (player walks to edge):
 | Connected blocker propagation | Main.gd `_expand_connected_blockers()` |
 | Beam multi-hop through Nuts | Main.gd `_compute_beam_path()` |
 | Key collect animation (shrink to center + fly to player) | Key.gd `_collect()` |
-| KeyDoor white flash on open | KeyDoor.gd `_open()` |
+| KeyDoor shrink-to-center on open (same as Door) | KeyDoor.gd `_open()` |
 | CRT static on room reset (fade-in → hold 0.2s → fade-out) | ResetEffect.gd |
 | Splash screen on launch | SplashScreen.gd |
+| Map overlay slides in/out from top (0.15s SINE) | MapOverlay.gd `_open_map()` / `_close_map()` |
+| Floor panel pulsing border highlight (chain tutorial) | FloorPanel.gd `set_highlight()` |
+| Ability intro sphere arcs (push → blocks, chain → panels) | AbilityTutorial.gd |

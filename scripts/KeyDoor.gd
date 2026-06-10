@@ -1,8 +1,11 @@
 extends Node2D
 
+const ANIM_DURATION := 0.15
+
 var _keys_total := 0
 var _keys_collected := 0
 var _opened := false
+var _tween: Tween = null
 
 @onready var sprite: Sprite2D = $Sprite2D
 
@@ -30,12 +33,32 @@ func key_collected() -> void:
 func _open() -> void:
 	_opened = true
 	remove_from_group("key_doors")
-	sprite.visible = false
+	GameManager.shake_requested.emit(5.0)
+	sprite.visible = true
+	sprite.modulate = Color.WHITE
+	_apply_shrink_scale(1.0)
+	if _tween:
+		_tween.kill()
+	_tween = create_tween()
+	_tween.tween_method(_apply_shrink_scale, 1.0, 0.0, ANIM_DURATION)
+	_tween.tween_callback(func() -> void:
+		sprite.visible = false
+		_apply_shrink_scale(1.0)
+	)
+
+func _apply_shrink_scale(s: float) -> void:
+	var half := sprite.texture.get_size() * 0.5 if sprite.texture else Vector2(16.0, 16.0)
+	sprite.scale = Vector2(s, s)
+	sprite.position = half * (1.0 - s)
 
 func reset() -> void:
 	if _opened:
 		return
 	_keys_collected = 0
+	if _tween:
+		_tween.kill()
 	sprite.visible = true
+	sprite.modulate = Color.WHITE
+	_apply_shrink_scale(1.0)
 	if not is_in_group("key_doors"):
 		add_to_group("key_doors")

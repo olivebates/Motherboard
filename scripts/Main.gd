@@ -25,6 +25,9 @@ var map_overlay: Node
 var ability_message: Node
 var _color_tween: Tween = null
 
+var _tab_canvas: CanvasLayer
+var _tab_label: Label
+
 const ProngScene = preload("res://scenes/Prong.tscn")
 
 const ResetEffectScene = preload("res://scripts/ResetEffect.gd")
@@ -41,6 +44,7 @@ const Y_SORT_GROUPS := [
 	"push_blocks",
 	"pass_blocks",
 	"keys",
+	"teleport_panels",
 ]
 
 func _ready() -> void:
@@ -58,6 +62,15 @@ func _ready() -> void:
 	map_overlay.visit(current_room)
 	camera.position = _room_center(Vector2i(0, 0))
 	GameManager.shake_requested.connect(_trigger_shake)
+	_tab_canvas = CanvasLayer.new()
+	_tab_canvas.layer = 5
+	add_child(_tab_canvas)
+	_tab_label = Label.new()
+	_tab_label.text = "TAB"
+	_tab_label.visible = false
+	_tab_label.add_theme_color_override("font_color", modulate)
+	_tab_label.add_theme_font_size_override("font_size", 11)
+	_tab_canvas.add_child(_tab_label)
 	queue_redraw()
 	var start_anchor := _get_anchor_for_room(current_room)
 	if start_anchor != null:
@@ -86,6 +99,19 @@ func _setup_y_sort_children() -> void:
 func _process(delta: float) -> void:
 	_shake_amount = lerpf(_shake_amount, 0.0, 20.0 * delta)
 	camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake_amount
+	_update_tab_label()
+
+func _update_tab_label() -> void:
+	if _tab_label == null:
+		return
+	var show := can_teleport_from_panel()
+	_tab_label.visible = show
+	if show:
+		_tab_label.add_theme_color_override("font_color", modulate)
+		# Follow visual_pos (sprite lerp anchor) and sit above the sprite top (-16) with extra gap
+		var world_pos := Vector2(player.visual_pos.x, player.visual_pos.y - 16.0 - 14.0)
+		var screen_pos := world_pos - camera.position - camera.offset + Vector2(400.0, 192.0)
+		_tab_label.position = screen_pos - Vector2(_tab_label.size.x * 0.5, 0.0)
 
 func _trigger_shake(strength: float) -> void:
 	_shake_amount = strength
@@ -141,6 +167,12 @@ func _is_static_solid(grid_pos: Vector2i) -> bool:
 			return true
 	for door_block in get_tree().get_nodes_in_group("key_doors"):
 		if door_block.get_grid_pos() == grid_pos:
+			return true
+	for panel in get_tree().get_nodes_in_group("teleport_panels"):
+		if not panel.is_open and panel.get_grid_pos() == grid_pos:
+			return true
+	for screw in get_tree().get_nodes_in_group("screws"):
+		if screw.get_grid_pos() == grid_pos:
 			return true
 	return false
 
@@ -276,10 +308,58 @@ func _get_anchor_for_room(room: Vector2i) -> Node:
 			return anchor
 	return null
 
+func is_player_on_active_teleport_panel() -> bool:
+	for panel in get_tree().get_nodes_in_group("teleport_panels"):
+		if panel.is_player_standing_on(player):
+			return true
+	return false
+
+func can_teleport_from_panel() -> bool:
+	if not is_player_on_active_teleport_panel():
+		return false
+	var total_open := 0
+	for panel in get_tree().get_nodes_in_group("teleport_panels"):
+		if panel.is_open:
+			total_open += 1
+	if total_open < 2:
+		return false
+	return not get_open_teleport_panel_rooms().is_empty()
+
+func get_open_teleport_panel_rooms() -> Array:
+	var rooms: Array = []
+	for panel in get_tree().get_nodes_in_group("teleport_panels"):
+		if not panel.is_open or panel.one_way:
+			continue
+		var gp: Vector2i = panel.get_grid_pos()
+		var room := Vector2i(floori(float(gp.x) / ROOM_WIDTH), floori(float(gp.y) / ROOM_HEIGHT))
+		if not rooms.has(room):
+			rooms.append(room)
+	return rooms
+
+func _get_open_panel_for_room(room: Vector2i) -> Node:
+	var rx0 := room.x * ROOM_WIDTH
+	var ry0 := room.y * ROOM_HEIGHT
+	for panel in get_tree().get_nodes_in_group("teleport_panels"):
+		if not panel.is_open:
+			continue
+		var gp: Vector2i = panel.get_grid_pos()
+		if gp.x >= rx0 and gp.x < rx0 + ROOM_WIDTH and gp.y >= ry0 and gp.y < ry0 + ROOM_HEIGHT:
+			return panel
+	return null
+
 func _on_teleport_requested(room: Vector2i) -> void:
+	var panel := _get_open_panel_for_room(room)
+	if panel != null:
+		var gp: Vector2i = panel.get_grid_pos()
+		if is_blocked(gp):
+			gp = _find_nearest_open_tile(gp)
+		player.reset_to(gp)
+		_transition_to_room(room)
+		room_entry_positions[room] = gp
+		return
 	var anchor := _get_anchor_for_room(room)
 	if anchor == null:
-		push_error("No TeleportAnchor in room %s" % str(room))
+		push_error("No teleport destination in room %s" % str(room))
 		return
 	var spawn_grid := Vector2i(floori(anchor.position.x / TILE_SIZE), floori(anchor.position.y / TILE_SIZE))
 	if is_blocked(spawn_grid):
@@ -353,10 +433,11 @@ func _compute_beam_path(pos_a: Vector2, pos_b: Vector2) -> Array:
 	var rx0 := current_room.x * ROOM_WIDTH
 	var ry0 := current_room.y * ROOM_HEIGHT
 	var nut_nodes: Array = []
-	for nut in get_tree().get_nodes_in_group("nuts"):
-		var gp: Vector2i = nut.grid_pos
-		if gp.x >= rx0 and gp.x < rx0 + ROOM_WIDTH and gp.y >= ry0 and gp.y < ry0 + ROOM_HEIGHT:
-			nut_nodes.append(nut)
+	if GameManager.has_ability("chain"):
+		for nut in get_tree().get_nodes_in_group("nuts"):
+			var gp: Vector2i = nut.grid_pos
+			if gp.x >= rx0 and gp.x < rx0 + ROOM_WIDTH and gp.y >= ry0 and gp.y < ry0 + ROOM_HEIGHT:
+				nut_nodes.append(nut)
 
 	# Path stores Vector2 for prong endpoints and Node2D for nuts so ElectricBeam
 	# can resolve nut positions each frame and follow the sliding sprite.

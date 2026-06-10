@@ -16,23 +16,23 @@ centered = false
 [node name="Area2DLeft" type="Area2D" parent="."]
 
 [node name="CollisionShapeLeft" type="CollisionShape2D" parent="Area2DLeft"]
-position = Vector2(12, 16)
+position = Vector2(13, 16)
 shape = SubResource("RectangleShape2D_xqocg")
 
 [node name="Area2DRight" type="Area2D" parent="."]
 
 [node name="CollisionShapeRight" type="CollisionShape2D" parent="Area2DRight"]
-position = Vector2(20, 16)
+position = Vector2(19, 16)
 shape = SubResource("RectangleShape2D_xqocg")
 
 [node name="Area2DUp" type="Area2D" parent="."]
 
 [node name="CollisionShapeUp" type="CollisionShape2D" parent="Area2DUp"]
-position = Vector2(16, 12)
+position = Vector2(16, 13)
 shape = SubResource("RectangleShape2D_xqocg")
 
 [node name="Area2DDown" type="Area2D" parent="."]
 
 [node name="CollisionShapeDown" type="CollisionShape2D" parent="Area2DDown"]
-position = Vector2(16, 20)
+position = Vector2(16, 19)
 shape = SubResource("RectangleShape2D_xqocg")

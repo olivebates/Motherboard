@@ -39,9 +39,7 @@ func _collect(player: Node2D) -> void:
 	var main: Node2D = get_tree().current_scene
 	main.room_entry_positions[main.current_room] = player.grid_pos
 	player.lock_movement()
-	var msg_overlay = main.ability_message
-	msg_overlay.show_message(message)
-	msg_overlay.dismissed.connect(func(): player.unlock_movement(), CONNECT_ONE_SHOT)
+	AbilityTutorial.play_intro(ability, player, main)
 
 func reset() -> void:
 	_collected = false
