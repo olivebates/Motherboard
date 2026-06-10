@@ -56,6 +56,14 @@ func visit(room: Vector2i) -> void:
 	if _open:
 		_draw_node.queue_redraw()
 
+func get_visited() -> Dictionary:
+	return _visited.duplicate()
+
+func set_visited(d: Dictionary) -> void:
+	_visited = d.duplicate()
+	if _open:
+		_draw_node.queue_redraw()
+
 func _process(delta: float) -> void:
 	if not _open:
 		return
@@ -98,6 +106,9 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed("move_right"):
 		_try_move_cursor(Vector2i(1, 0))
 	elif event.is_action_pressed("place_prong"):
+		var cur_room: Vector2i = _main.current_room if _main else Vector2i.ZERO
+		if _cursor == cur_room:
+			return
 		if _open_panel_rooms.has(_cursor):
 			_space_hint_done = true
 			if not _wasd_hint_done and _cursor != _first_teleport_room:
@@ -230,7 +241,7 @@ func _on_draw() -> void:
 	const PAD := 20.0
 	const NAME_FONT_SIZE := 16
 
-	var pname := _get_panel_name_for_room(_cursor) if _teleport_mode else ""
+	var pname := "The Map"
 	var font := ThemeDB.fallback_font
 
 	# Build instruction parts: [{text, size}]
@@ -319,12 +330,11 @@ func _on_draw() -> void:
 					stub_to = stub_from + Vector2(0, -3)
 				_draw_node.draw_line(stub_from, stub_to, tint, 1.0)
 
+	_draw_node.draw_string(font, Vector2(origin_x_for_text, origin.y - 8.0),
+			pname, HORIZONTAL_ALIGNMENT_CENTER, box.size.x, NAME_FONT_SIZE, tint)
 	if _teleport_mode:
 		var csp := _room_to_screen(_cursor, origin, min_room)
 		_draw_node.draw_rect(Rect2(csp - Vector2(1, 1), Vector2(CELL_W + 3, CELL_H + 3)), tint, false, 1.0)
-		if pname != "":
-			_draw_node.draw_string(font, Vector2(origin_x_for_text, origin.y - 8.0),
-					pname, HORIZONTAL_ALIGNMENT_CENTER, box.size.x, NAME_FONT_SIZE, tint)
 
 	# Draw instruction parts inline, centered as a group
 	var instr_x := (vp.x - total_instr_w) * 0.5

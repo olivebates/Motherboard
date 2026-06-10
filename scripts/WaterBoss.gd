@@ -2,7 +2,7 @@ extends "res://scripts/WaterEnemy.gd"
 
 enum State { CHASE, WINDUP, CHARGE, SPAWN_TELEGRAPH, DYING }
 
-const MAX_HP = 2000
+const MAX_HP = 1000
 const BASE_SPEED = 40.0
 const MAX_SPEED = 100.0
 const BOSS_SCALE = 2.0
@@ -121,6 +121,7 @@ func _process(delta: float) -> void:
 		hp -= 1
 		_beam_time += delta
 		_main._trigger_shake(1.0)
+		Utils.shake_boss_health_bar(self)
 		if not _was_in_beam:
 			_do_freeze_frame()
 		if _beam_time >= 1.5:
@@ -259,6 +260,7 @@ func _trigger_phase2() -> void:
 func _boss_die() -> void:
 	_state = State.DYING
 	_dead = true
+	SaveManager.notify_boss_defeated()
 	_do_death_shakes()
 	if _death_tween:
 		_death_tween.kill()
@@ -274,7 +276,7 @@ func _boss_die() -> void:
 			e.queue_free()
 	# Freeze for 1.0s then arc off screen
 	_death_tween = create_tween()
-	_death_tween.tween_callback(_launch_death_arc).set_delay(1.0)
+	_death_tween.tween_callback(_launch_death_arc).set_delay(1.5)
 
 func _launch_death_arc() -> void:
 	_arc_started = true
@@ -350,7 +352,7 @@ func _spawn_minions() -> void:
 func _spawn_water_enemy(spawn_pos: Vector2) -> void:
 	var tile_pos = Vector2(floori(spawn_pos.x / TILE_SIZE) * TILE_SIZE,
 		floori(spawn_pos.y / TILE_SIZE) * TILE_SIZE)
-	if (tile_pos - _main.player.get_body_center()).length() < 64.0:
+	if (tile_pos - _main.player.get_body_center()).length() < 96.0:
 		return
 	var e = WaterEnemyScene.instantiate()
 	e.position = tile_pos

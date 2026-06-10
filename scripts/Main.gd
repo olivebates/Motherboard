@@ -72,15 +72,18 @@ func _ready() -> void:
 	_tab_label.visible = false
 	_tab_label.add_theme_color_override("font_color", modulate)
 	_tab_label.add_theme_font_size_override("font_size", 11)
+	_tab_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_tab_label.add_theme_constant_override("outline_size", 2)
 	_tab_canvas.add_child(_tab_label)
 	queue_redraw()
 	var start_anchor := _get_anchor_for_room(current_room)
 	if start_anchor != null:
 		modulate = start_anchor.color
 		reset_effect.color = modulate
-	var splash := SplashScreenScene.new()
-	add_child(splash)
-	player.lock_movement()
+	if not SaveManager.skip_splash:
+		var splash := SplashScreenScene.new()
+		add_child(splash)
+		player.lock_movement()
 
 
 func _setup_y_sort_children() -> void:

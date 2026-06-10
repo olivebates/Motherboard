@@ -1,7 +1,7 @@
 extends Node2D
 
 const TILE_SIZE := 32
-const OPEN_HOLD_TIME := 0.2
+const OPEN_HOLD_TIME := 0.1
 
 @export var panel_name: String = ""
 @export var one_way: bool = false

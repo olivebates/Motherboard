@@ -15,6 +15,12 @@ func grant_ability(ability: String) -> void:
 func has_ability(ability: String) -> bool:
 	return _abilities.get(ability, false)
 
+func get_abilities() -> Dictionary:
+	return _abilities.duplicate()
+
+func set_abilities(d: Dictionary) -> void:
+	_abilities = d.duplicate()
+
 var floor_panels: Dictionary = {}
 var doors: Dictionary = {}
 
@@ -47,6 +53,12 @@ func clear_prongs() -> Array:
 	prongs.clear()
 	return removed
 
+func clear_scene_state() -> void:
+	prongs.clear()
+	doors.clear()
+	floor_panels.clear()
+	beam_blocked = false
+
 const PANEL_ACTIVATION_RADIUS := 24.0
 
 func _panel_near(world_pos: Vector2) -> Vector2i:
@@ -59,7 +71,8 @@ func _panel_near(world_pos: Vector2) -> Vector2i:
 func evaluate_puzzle() -> void:
 	var ids_to_open: Array = []
 
-	if not beam_blocked and prongs.size() == MAX_PRONGS:
+	if not beam_blocked and prongs.size() == MAX_PRONGS \
+			and is_instance_valid(prongs[0]["node"]) and is_instance_valid(prongs[1]["node"]):
 		var world_a: Vector2 = prongs[0]["node"].position
 		var world_b: Vector2 = prongs[1]["node"].position
 		var panel_a := _panel_near(world_a)
@@ -78,11 +91,13 @@ func evaluate_puzzle() -> void:
 func get_prong_world_positions() -> Array:
 	var positions: Array = []
 	for p in prongs:
-		positions.append(p["node"].position)
+		if is_instance_valid(p["node"]):
+			positions.append(p["node"].position)
 	return positions
 
 func get_prong_positions() -> Array:
 	var positions: Array = []
 	for p in prongs:
-		positions.append(p["grid_pos"])
+		if is_instance_valid(p["node"]):
+			positions.append(p["grid_pos"])
 	return positions

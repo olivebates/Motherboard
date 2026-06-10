@@ -23,15 +23,30 @@ func create_boss_health_bar(boss: Node, main: Node) -> void:
 	var inner := _make_rect(m - o, m - o, bar_w + o * 2.0, h + o * 2.0, Color.BLACK)
 	var bg := _make_rect(m, m, bar_w, h, Color.BLACK)
 	var fill := _make_rect(m, m, bar_w, h, Color.WHITE)
+	var particles := CPUParticles2D.new()
+	particles.emitting = false
+	particles.one_shot = true
+	particles.explosiveness = 1.0
+	particles.amount = 8
+	particles.lifetime = 0.35
+	particles.direction = Vector2(1.0, -1.0).normalized()
+	particles.spread = 45.0
+	particles.initial_velocity_min = 120.0
+	particles.initial_velocity_max = 220.0
+	particles.gravity = Vector2(0.0, 200.0)
+	particles.scale_amount_min = 2.0
+	particles.scale_amount_max = 4.0
 	canvas.add_child(outer)
 	canvas.add_child(inner)
 	canvas.add_child(bg)
 	canvas.add_child(fill)
+	canvas.add_child(particles)
 	_bars[key] = {
 		"canvas": canvas,
 		"outer": outer,
 		"fill": fill,
 		"bar_w": bar_w,
+		"particles": particles,
 	}
 
 func update_boss_health_bar(boss: Node, hp: int, max_hp: int, visible: bool, tint: Color) -> void:
@@ -52,15 +67,38 @@ func update_boss_health_bar(boss: Node, hp: int, max_hp: int, visible: bool, tin
 	outer.color = tint
 	fill.color = tint
 	fill.size.x = bar_w * clampf(float(hp) / float(max_hp), 0.0, 1.0)
+	var particles: CPUParticles2D = bar["particles"]
+	particles.color = tint
+	particles.position = Vector2(BAR_MARGIN + fill.size.x, BAR_MARGIN + BAR_H * 0.5)
 
 func remove_boss_health_bar(boss: Node) -> void:
 	var key := boss.get_instance_id()
 	if not _bars.has(key):
 		return
-	var canvas: CanvasLayer = _bars[key]["canvas"]
+	var canvas = _bars[key]["canvas"]
+	_bars.erase(key)
 	if is_instance_valid(canvas):
 		canvas.queue_free()
-	_bars.erase(key)
+
+func shake_boss_health_bar(boss: Node) -> void:
+	var key := boss.get_instance_id()
+	if not _bars.has(key):
+		return
+	var entry: Dictionary = _bars[key]
+	var canvas = entry["canvas"]
+	if not is_instance_valid(canvas):
+		return
+	if entry.get("shaking", false):
+		return
+	entry["shaking"] = true
+	var particles: CPUParticles2D = entry["particles"]
+	if is_instance_valid(particles):
+		particles.restart()
+	var tween = canvas.create_tween()
+	tween.tween_property(canvas, "offset", Vector2(2.0, randf_range(-2.0, 2.0)), 0.05)
+	tween.tween_property(canvas, "offset", Vector2(-2.0, randf_range(-2.0, 2.0)), 0.05)
+	tween.tween_property(canvas, "offset", Vector2.ZERO, 0.04)
+	tween.tween_callback(func(): entry["shaking"] = false)
 
 func _make_rect(x: float, y: float, w: float, h: float, color: Color) -> ColorRect:
 	var r := ColorRect.new()

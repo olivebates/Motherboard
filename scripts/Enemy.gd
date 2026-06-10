@@ -91,6 +91,37 @@ func _move_y(dy: float) -> void:
 			allowed = 0.0
 	position.y += clampf(allowed, minf(dy, 0.0), maxf(dy, 0.0))
 
+func _eject_from_solid() -> void:
+	var rect := _hitbox(position)
+	var inside := false
+	for solid in _main.get_player_blocking_rects(rect):
+		if rect.intersects(solid):
+			inside = true
+			break
+	if not inside:
+		return
+	var origin := Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
+	var visited := { origin: true }
+	var queue: Array[Vector2i] = [origin]
+	while not queue.is_empty():
+		var gp: Vector2i = queue.pop_front()
+		var candidate := Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE)
+		var candidate_rect := _hitbox(candidate)
+		var blocked := false
+		for solid in _main.get_player_blocking_rects(candidate_rect):
+			if candidate_rect.intersects(solid):
+				blocked = true
+				break
+		if not blocked:
+			position = candidate
+			_visual_pos = position
+			return
+		for d in [Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1)]:
+			var next = gp + d
+			if not visited.has(next):
+				visited[next] = true
+				queue.append(next)
+
 func push(dir: Vector2i) -> void:
 	position += Vector2(dir.x, dir.y) * TILE_SIZE
 

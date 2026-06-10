@@ -21,17 +21,20 @@ func _count_keys() -> void:
 	for key in get_tree().get_nodes_in_group("keys"):
 		if _room_of(key.position) == my_room:
 			_keys_total += 1
+	if _keys_total == 0:
+		_open()
 
 func get_grid_pos() -> Vector2i:
 	return Vector2i(int(position.x) / 32, int(position.y) / 32)
 
 func key_collected() -> void:
 	_keys_collected += 1
-	if _keys_collected >= _keys_total and _keys_total > 0:
+	if _keys_collected >= _keys_total:
 		_open()
 
 func _open() -> void:
 	_opened = true
+	SaveManager.notify_key_door_opened(get_grid_pos())
 	remove_from_group("key_doors")
 	GameManager.shake_requested.emit(5.0)
 	sprite.visible = true

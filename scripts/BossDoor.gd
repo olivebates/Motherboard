@@ -11,7 +11,6 @@ var start_grid_pos: Vector2i:
 @onready var _sprite: Sprite2D = $Sprite2D
 
 func _ready() -> void:
-	add_to_group("push_blocks")
 	add_to_group("boss_doors")
 
 func get_collision_rect() -> Rect2:
@@ -19,6 +18,7 @@ func get_collision_rect() -> Rect2:
 
 func open() -> void:
 	_opened = true
+	SaveManager.notify_boss_door_opened(start_grid_pos)
 	queue_free()
 
 func reset() -> void:

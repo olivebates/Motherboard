@@ -92,12 +92,14 @@ scenes/
   Enemy.tscn               — Enemy that walks toward the player; Front_Idle1.png sprite; CPUParticles2D death burst
   WaterEnemy.tscn          — WaterEnemy variant; uses WaterEnemy.gd; freezes when not in current room; supports boss_spawned flag
   WaterBoss.tscn           — Boss enemy; uses WaterBoss.gd; 2000 HP at 2× scale; place at tile top-left in any room
-  BossDoor.tscn            — Solid door that permanently disappears when the boss dies; uses locked_door1.png; in "push_blocks" and "boss_doors" groups
+  BossDoor.tscn            — Solid door that permanently disappears when the boss dies; uses locked_door1.png; in "boss_doors" group only (NOT push_blocks — has no push() method)
+  TimedObject.tscn         — Object that appears after 2 minutes in its room (chain upgrade not yet acquired); hides and resets timer on each room entry; always hidden once chain is acquired; Sprite2D child provides the visual
 
 scripts/
   GameManager.gd           — Autoload singleton (puzzle state + ability tracking)
-  Main.gd                  — Root scene controller; on room reset: boss_spawned_enemies in current room are queue_freed instead of reset; on room transition: boss_spawned_enemies in departing room are queue_freed
-  Player.gd                — Player movement and input; exports start_with_push, start_with_chain
+  Main.gd                  — Root scene controller; on room reset: boss_spawned_enemies in current room are queue_freed instead of reset; on room transition: boss_spawned_enemies in departing room are queue_freed; skips splash screen when SaveManager.skip_splash is true
+  Player.gd                — Player movement and input; exports start_with_push, start_with_chain, save_system_enabled; calls SaveManager.on_player_ready() at end of _ready()
+  SaveManager.gd           — Autoload singleton; save/load system; autosaves every 5s to active slot; 1–9 selects slot (loads if file exists); Shift+1–9 deletes that slot; save_system_enabled=false on Player auto-activates slot 1 and loads it on start; reloads scene on load (skip_splash=true); tracks key_doors_opened, boss_doors_opened, boss_defeated for permanently-freed nodes; status label (top-left, fades after 1.5s) for slot feedback; save files at user://save_slot_N.json
   Prong.gd                 — Prong placement logic
   PushBlock.gd             — Push block with sprite-lag animation; pushes enemies on contact
   ElectricBeam.gd          — Animated electricity beam (white, no transparency)
@@ -106,7 +108,7 @@ scripts/
   LightningBlocker.gd      — Lightning blocker; alternates textures when active
   WallTileMap.gd           — TileMapLayer script for painting walls in-editor
   ResetEffect.gd           — CRT static CanvasLayer effect for room reset
-  KeyDoor.gd               — Solid door; counts Keys in same room, opens with shrink-to-center animation
+  KeyDoor.gd               — Solid door; counts Keys in same room, opens with shrink-to-center animation; _open() calls SaveManager.notify_key_door_opened() before removing self from group
   Key.gd                   — Collectible; shrinks to center on pickup, notifies KeyDoor
   Nut.gd                   — Pushable conductor; beam routes through it when chain ability active; pushes enemies on contact
   Screw.gd                 — Static conductor; beam routes through it when chain ability active; cannot be pushed
@@ -121,11 +123,12 @@ scripts/
   AbilityMessage.gd        — CanvasLayer message overlay (layer 25); prompt appears after 2s
   AbilityGate.gd           — Node2D that hides its sprite until required_ability is granted
   AbilityTutorial.gd       — Autoload singleton; plays per-ability intro animations (sphere arcs, block/panel highlights)
-  Utils.gd                 — Autoload singleton; shared helpers (reusable boss health bar HUD)
+  Utils.gd                 — Autoload singleton; shared helpers (reusable boss health bar HUD); remove_boss_health_bar uses untyped canvas var + erases dict entry before queue_free to avoid freed-instance crash on scene reload
   Enemy.gd                 — Enemy; walks toward player, blocked by walls/solids, killed by beam, resets player on contact
   WaterEnemy.gd            — Extends Enemy.gd; freezes movement when not in current room; boss_spawned flag auto-adds to "boss_spawned_enemies" group (deleted on room exit/reset instead of reset)
   WaterBoss.gd             — Extends WaterEnemy.gd; 2× scale, 2000 HP; @export var debug_low_hp: bool sets HP to 10 at start if true; boss health bar via Utils (visible in boss home room when alive); takes 1 dmg/frame from beam (shake 1.0) + freeze-frame on first contact each exposure; teleports to random free tile (≥5 tiles from player, ≥2 tiles from room border) after 1.5s in beam; sprite slides to new position on teleport; speed scales with HP loss (BASE=40→MAX=100); spawns two WaterEnemy minions 3 tiles out below 80% HP with 0.7s scale-pulse telegraph (interval scales 4s→2s as HP drops, skips spawn if within 64px of player); charge attack: cooldown 3s, triggers when player within 5 tiles — 1s squash/stretch wind-up, then lunges at 240 px/s decelerating to normal speed; teleport mid-windup resets cooldown; phase 2 at 50% HP: screen shake + brief pause; death: series of 3 extreme shakes (0.5s apart), minion water_enemies in room deleted immediately (boss skips self in that loop), boss freezes 1s then arcs off screen in a parabola at z_index=100 with a slight rotation (dir * p * 0.8 rad) — doors open and particles fire once boss exits room bounds; sprite lag at half enemy speed (BOSS_SPRITE_SPEED=10); no modulation effects
-  BossDoor.gd              — Solid tile object in "push_blocks" and "boss_doors" groups; provides grid_pos/start_grid_pos computed from position; open() called by WaterBoss on death → queue_free(); reset() also frees if already opened (permanent removal)
+  BossDoor.gd              — Solid tile object in "boss_doors" group only; provides grid_pos/start_grid_pos computed from position; open() calls SaveManager.notify_boss_door_opened() then queue_free(); reset() also frees if already opened (permanent removal)
+  TimedObject.gd           — Node2D that tracks per-room-visit time; sprite appears after 120s if player lacks chain ability; resets (hides + clears timer) each time the player enters its room; always hidden after chain ability granted; requires Sprite2D child named "Sprite2D"
 
 Sprites/
   placeholder.png          — 32×32 RGBA placeholder
@@ -168,13 +171,16 @@ Sprites/
 - `place_prong(node, grid_pos)` — appends entry
 - `remove_prong(node)` — removes by node reference
 - `clear_prongs()` → `Array` — clears all, returns removed for animation
-- `evaluate_puzzle()` — opens doors if: not beam_blocked, 2 prongs on **different** panels sharing at least one id; two prongs on the same panel never open doors
+- `clear_scene_state()` — clears prongs, doors, floor_panels, resets beam_blocked; called by SaveManager before scene reload to prevent stale node refs
+- `evaluate_puzzle()` — opens doors if: not beam_blocked, 2 prongs on **different** panels sharing at least one id; guards prong node refs with `is_instance_valid()`
 - `register_floor_panel(grid_pos, id, id2="")` — stores 1–2 IDs for a panel
 - `_panel_near(world_pos)` → `Vector2i` — returns panel grid pos within activation radius, or `(-999999,-999999)`
 - `grant_ability(ability)` — marks ability as acquired
 - `has_ability(ability)` → `bool`
-- `get_prong_positions()` → `Array[Vector2i]`
-- `get_prong_world_positions()` → `Array[Vector2]`
+- `get_abilities()` → `Dictionary` — returns duplicate of `_abilities`; used by SaveManager
+- `set_abilities(d)` — replaces `_abilities` from a dictionary; used by SaveManager on load
+- `get_prong_positions()` → `Array[Vector2i]` — skips invalid nodes
+- `get_prong_world_positions()` → `Array[Vector2]` — skips invalid nodes
 
 ---
 
@@ -232,6 +238,8 @@ Sprites/
 **Push detection:** After movement; single cardinal input; flush against push-block face. Closest block by `_sprite_center()`. On success: `block.push(dir)`, shake (0.8), `PUSH_FREEZE` axis lock. Push is **gated** by `GameManager.has_ability("push")` — no pushing until that ability is acquired.
 
 **Startup ability grants:** `@export var start_with_push: bool` and `@export var start_with_chain: bool` — if true, the corresponding ability is granted via `GameManager.grant_ability()` in `_ready()` without requiring a pickup.
+
+**Save system:** `@export var save_system_enabled: bool = false`. If `false`, SaveManager auto-activates slot 1 and loads it on start. If `true`, the player manually picks a slot with 1–9. `SaveManager.on_player_ready(save_system_enabled)` is called at the end of `_ready()`.
 
 **Key functions:** `get_body_center()` → hitbox center world pos; `_hitbox_rect(pos)`, `_sprite_center()`, `_grid_to_world()` / `_world_to_grid()`, `reset_to(gp)`, `_try_push()`, `_start_push_lock(dir)`, `eject_from_solid()` — BFS from current grid pos to nearest free tile; called every frame in `_process` and at end of `reset_to`
 
@@ -443,6 +451,8 @@ Sprites/
 
 **Key variables:** `_teleport_mode: bool`, `_open_panel_rooms: Array` (destinations only), `_visited: Dictionary`, `_cursor: Vector2i`, `_slide_tween: Tween`, `_pulse_timer: float`, `_pulse_large: bool`, `_space_hint_done: bool`, `_wasd_hint_done: bool`, `_first_two_done: bool`, `_input_delay: float`, `_first_teleport_room: Vector2i`, `_first_teleport_room_set: bool`
 
+**Save/load helpers:** `get_visited()` → duplicate of `_visited`; `set_visited(d)` — replaces `_visited` and redraws if open; both used by SaveManager.
+
 **Hint pulsing:** "Space: Teleport" pulses font size 11↔12 every 0.5s until the player teleports. "WASD/Arrow Keys: Move" pulses the same way until the player teleports to any room that is not `_first_teleport_room`. Both start at large size (`_pulse_large = true`) when the map opens. Pulsing is driven in `_process`; hints are drawn as inline segments so each can have an independent font size.
 
 **First-open delay:** The first time the map opens with ≥2 teleport destinations, all input is blocked for 1 second (`_input_delay = 1.0`). A faint `...` is shown below the instructions during the delay.
@@ -450,6 +460,38 @@ Sprites/
 **Visual style:** Background is a solid-black box with a tint-colored 2px border. Minimum size is half the viewport (400×192). Box expands to fit the widest of: room grid, instruction text, or panel name text, and expands symmetrically in height if needed. All rooms, connections, stubs, and text drawn in `Main.modulate` tint. Rooms with an open destination panel show a black dot at center. Cursor room has a 1px tint outline. Panel name drawn above rooms; instruction segments drawn inline below, centered as a group. All text uses tint color.
 
 **Connections:** `_has_exit(room, dir)` — checks for at least one non-wall tile on the border. Connections drawn between visited rooms that have an exit between them.
+
+---
+
+---
+
+### SaveManager.gd (autoload singleton)
+**Purpose:** Persistent save/load system. Autosaves the active slot every 5 seconds. Reloads the scene when loading to guarantee a clean world state.
+
+**Key constants:** `AUTOSAVE_INTERVAL = 5.0`, `SAVE_DIR = "user://"`
+
+**Key variables:**
+- `active_slot: int` — currently active save slot (1–9); `-1` = none
+- `skip_splash: bool` — set `true` before scene reload so `Main._ready()` skips the splash screen
+- `_pending_data: Dictionary` — save data waiting to be applied after the reloaded scene is ready
+- `_key_doors_opened / _boss_doors_opened / _boss_defeated` — accumulated state for permanently-freed nodes that can't be queried after death
+
+**Input:**
+- **1–9**: select slot; loads immediately if file exists, otherwise just activates the slot
+- **Shift+1–9**: delete that slot's save file; deactivates slot if it was active
+
+**Save data (JSON at `user://save_slot_N.json`):** player world position, current room, abilities dict, push block/nut grid positions (keyed by `start_grid_pos`), collected keys (by `start_grid_pos`), opened KeyDoors, open TeleportPanels, removed BossDoors, boss defeated flag, enemy positions + dead flags, map visited rooms.
+
+**Load flow:** `load_slot()` → `GameManager.clear_scene_state()` + `reload_current_scene()` → `_process()` detects new scene is ready → `call_deferred("_apply_load", data)` → restores all state silently (no animations/shakes) → calls `Main._update_beam()`.
+
+**Auto-slot mode** (`Player.save_system_enabled = false`): `on_player_ready(false)` activates slot 1 and deferred-loads it if the file exists. Manual mode (`true`): user picks slot with 1–9.
+
+**Notification hooks** (called by game objects before self-destruction):
+- `notify_key_door_opened(gp)` — called from `KeyDoor._open()`
+- `notify_boss_door_opened(gp)` — called from `BossDoor.open()`
+- `notify_boss_defeated()` — called from `WaterBoss._boss_die()`
+
+**Status HUD:** fading top-left Label (layer 50) shown on slot select, load, and delete events.
 
 ---
 

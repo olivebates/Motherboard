@@ -20,4 +20,7 @@ func _in_current_room() -> bool:
 func _process(delta: float) -> void:
 	if not _in_current_room():
 		return
+	_eject_from_solid()
+	if _main.map_overlay._open:
+		return
 	super._process(delta)

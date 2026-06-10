@@ -9,9 +9,11 @@ const PUSH_FREEZE := 0.15
 
 @export var start_with_push: bool = false
 @export var start_with_chain: bool = false
+@export var save_system_enabled: bool = false
 
 var movement_locked := false
 var visual_pos: Vector2
+var speed_multiplier := 1.0
 var _push_lock_dir := Vector2i.ZERO
 var _push_tween: Tween
 var _main: Node2D
@@ -46,6 +48,7 @@ func _ready() -> void:
 	if start_with_chain:
 		GameManager.grant_ability("chain")
 	eject_from_solid()
+	SaveManager.on_player_ready(save_system_enabled)
 
 func get_body_center() -> Vector2:
 	return YSortHitboxBottom.hitbox_center_from_root(position, _body_offset, _hitbox_offset)
@@ -68,7 +71,7 @@ func _process(delta: float) -> void:
 	if input.length_squared() > 0.0:
 		input = input.normalized()
 
-	var velocity := input * SPEED
+	var velocity := input * SPEED * speed_multiplier
 	var main: Node = _main
 
 	var dx := velocity.x * delta
