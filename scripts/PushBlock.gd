@@ -62,6 +62,12 @@ func push(direction: Vector2i) -> void:
 	position = new_world
 	sprite.position = old_world - new_world + SPRITE_OFFSET
 
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		var ec = enemy.get_center()
+		var enemy_tile := Vector2i(floori(ec.x / TILE_SIZE), floori(ec.y / TILE_SIZE))
+		if enemy_tile == grid_pos:
+			enemy.push(direction)
+
 	if _tween:
 		_tween.kill()
 	_tween = create_tween()

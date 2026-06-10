@@ -2,8 +2,8 @@ extends Node2D
 
 const TILE_SIZE := 32
 const WORLD_OFFSET := 0
-const SPEED := 272.0
-const SPRITE_SPEED := 20.0
+const SPEED := 217.6
+const SPRITE_SPEED := 24.0
 const CONTACT_EPS := 0.1
 const PUSH_FREEZE := 0.15
 
@@ -51,6 +51,7 @@ func get_body_center() -> Vector2:
 	return YSortHitboxBottom.hitbox_center_from_root(position, _body_offset, _hitbox_offset)
 
 func _process(delta: float) -> void:
+	eject_from_solid()
 	var body_center := position + _body_offset
 	visual_pos = visual_pos.lerp(body_center, minf(1.0, SPRITE_SPEED * delta))
 	_sprite.position = visual_pos - body_center + YSortHitboxBottom.SPRITE_OFFSET
@@ -254,6 +255,7 @@ func unlock_movement() -> void:
 func reset_to(gp: Vector2i) -> void:
 	position = _grid_to_world(gp)
 	visual_pos = position + _body_offset
+	eject_from_solid()
 
 func _is_inside_solid() -> bool:
 	var rect := _hitbox_rect(position)

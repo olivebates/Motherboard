@@ -12,6 +12,8 @@ const ROOM_W := 25
 const ROOM_H := 12
 
 const SLIDE_DURATION := 0.15
+const PULSE_INTERVAL := 0.5
+const INSTR_FONT_SIZE := 11
 
 var _visited: Dictionary = {}
 var _cursor := Vector2i.ZERO
@@ -22,6 +24,20 @@ var _main
 var _wall_tilemap: TileMapLayer
 var _draw_node: Node2D
 var _slide_tween: Tween = null
+
+# Pulsing hint state
+var _pulse_timer := 0.0
+var _pulse_large := false
+var _space_hint_done := false
+var _wasd_hint_done := false
+
+# First-time-with-two-teleports delay
+var _first_two_done := false
+var _input_delay := 0.0
+
+# The room of the first teleport panel the player activated
+var _first_teleport_room := Vector2i(-9999, -9999)
+var _first_teleport_room_set := false
 
 func _ready() -> void:
 	layer = 10
@@ -40,6 +56,22 @@ func visit(room: Vector2i) -> void:
 	if _open:
 		_draw_node.queue_redraw()
 
+func _process(delta: float) -> void:
+	if not _open:
+		return
+	if _input_delay > 0.0:
+		_input_delay -= delta
+		_draw_node.queue_redraw()
+		return
+	var needs_pulse := (_teleport_mode and not _space_hint_done) or \
+		(_teleport_mode and _open_panel_rooms.size() > 1 and not _wasd_hint_done)
+	if needs_pulse:
+		_pulse_timer += delta
+		if _pulse_timer >= PULSE_INTERVAL:
+			_pulse_timer -= PULSE_INTERVAL
+			_pulse_large = not _pulse_large
+			_draw_node.queue_redraw()
+
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
 		if _open:
@@ -53,6 +85,8 @@ func _input(event: InputEvent) -> void:
 	if not _open:
 		return
 	get_viewport().set_input_as_handled()
+	if _input_delay > 0.0:
+		return
 	if not _teleport_mode:
 		return
 	if event.is_action_pressed("move_up"):
@@ -65,6 +99,9 @@ func _input(event: InputEvent) -> void:
 		_try_move_cursor(Vector2i(1, 0))
 	elif event.is_action_pressed("place_prong"):
 		if _open_panel_rooms.has(_cursor):
+			_space_hint_done = true
+			if not _wasd_hint_done and _cursor != _first_teleport_room:
+				_wasd_hint_done = true
 			teleport_requested.emit(_cursor)
 			_close_map()
 
@@ -81,7 +118,6 @@ func _try_move_cursor(dir: Vector2i) -> void:
 			continue
 		var forward := float(dot)
 		var perp := absf(float(delta.x * dir.y - delta.y * dir.x))
-		# Penalise lateral offset heavily so WASD snaps to the most "on-axis" room
 		var score := perp * 3.0 + forward
 		if score < best_score:
 			best_score = score
@@ -92,6 +128,8 @@ func _try_move_cursor(dir: Vector2i) -> void:
 
 func _open_map() -> void:
 	_open = true
+	_pulse_timer = 0.0
+	_pulse_large = true
 	_draw_node.visible = true
 	_draw_node.position.y = -384.0
 	if _teleport_mode and not _open_panel_rooms.is_empty():
@@ -100,6 +138,14 @@ func _open_map() -> void:
 			_cursor = cur_room
 		else:
 			_cursor = _open_panel_rooms[0]
+		# Record first teleport room
+		if not _first_teleport_room_set:
+			_first_teleport_room = cur_room if _open_panel_rooms.has(cur_room) else _open_panel_rooms[0]
+			_first_teleport_room_set = true
+		# 1-second delay on first opening with 2+ teleports
+		if not _first_two_done and _open_panel_rooms.size() >= 2:
+			_first_two_done = true
+			_input_delay = 1.0
 	_draw_node.queue_redraw()
 	if _main:
 		_main.player.lock_movement()
@@ -159,7 +205,6 @@ func _on_draw() -> void:
 	var vp := Vector2(800.0, 384.0)
 	var tint: Color = _main.modulate if _main else Color.WHITE
 
-	# Merge visited rooms and open panel rooms so unvisited destinations appear on the map
 	var all_rooms: Dictionary = {}
 	for r in _visited:
 		all_rooms[r] = true
@@ -184,23 +229,44 @@ func _on_draw() -> void:
 	var map_bottom := origin.y + (max_room.y - min_room.y) * STEP_Y + CELL_H + 36.0
 	const PAD := 20.0
 	const NAME_FONT_SIZE := 16
-	const INSTR_FONT_SIZE := 11
 
 	var pname := _get_panel_name_for_room(_cursor) if _teleport_mode else ""
-	var instructions: String
-	if _teleport_mode:
-		instructions = "WASD: Move    Space: Teleport    TAB: Close" if _open_panel_rooms.size() > 1 else "Space: Teleport    TAB: Close"
-	else:
-		instructions = "TAB: Close"
-
 	var font := ThemeDB.fallback_font
+
+	# Build instruction parts: [{text, size}]
+	var parts: Array = []
+	var sep := "    "
+	var pulse_size := INSTR_FONT_SIZE + (1 if _pulse_large else 0)
+
+	if _teleport_mode:
+		if _open_panel_rooms.size() > 1:
+			var wasd_size := pulse_size if not _wasd_hint_done else INSTR_FONT_SIZE
+			parts.append({"text": "WASD/Arrow Keys: Move", "size": wasd_size})
+			parts.append({"text": sep, "size": INSTR_FONT_SIZE})
+		var space_size := pulse_size if not _space_hint_done else INSTR_FONT_SIZE
+		parts.append({"text": "Space: Teleport", "size": space_size})
+		parts.append({"text": sep, "size": INSTR_FONT_SIZE})
+	parts.append({"text": "TAB: Close", "size": INSTR_FONT_SIZE})
+
+	var total_instr_w := 0.0
+	for p in parts:
+		total_instr_w += font.get_string_size(p["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, p["size"]).x
+
 	var name_h := float(NAME_FONT_SIZE) + 8.0 if pname != "" else 0.0
 	var content_top := origin.y - name_h
-	var content_bottom := map_bottom + float(INSTR_FONT_SIZE)
+	var instr_h := float(INSTR_FONT_SIZE + 2)
+	var content_bottom := map_bottom + instr_h
 
-	var instr_w := font.get_string_size(instructions, HORIZONTAL_ALIGNMENT_LEFT, -1, INSTR_FONT_SIZE).x
 	var name_w := font.get_string_size(pname, HORIZONTAL_ALIGNMENT_LEFT, -1, NAME_FONT_SIZE).x if pname != "" else 0.0
-	var content_w := maxf(total_w, maxf(instr_w, name_w))
+	var content_w := maxf(total_w, maxf(total_instr_w, name_w))
+
+	# Minimum half-screen size
+	content_w = maxf(content_w, vp.x * 0.5 - PAD * 2.0)
+	var current_h := content_bottom - content_top + PAD * 2.0
+	if current_h < vp.y * 0.5:
+		var expand := (vp.y * 0.5 - current_h) * 0.5
+		content_top -= expand
+		content_bottom += expand
 
 	var box_x := (vp.x - content_w) * 0.5 - PAD
 	var box := Rect2(
@@ -260,8 +326,22 @@ func _on_draw() -> void:
 			_draw_node.draw_string(font, Vector2(origin_x_for_text, origin.y - 8.0),
 					pname, HORIZONTAL_ALIGNMENT_CENTER, box.size.x, NAME_FONT_SIZE, tint)
 
-	_draw_node.draw_string(font, Vector2(origin_x_for_text, map_bottom),
-			instructions, HORIZONTAL_ALIGNMENT_CENTER, box.size.x, INSTR_FONT_SIZE, tint)
+	# Draw instruction parts inline, centered as a group
+	var instr_x := (vp.x - total_instr_w) * 0.5
+	for p in parts:
+		var sz: int = p["size"]
+		# Align baseline: shift up if larger font so baseline matches INSTR_FONT_SIZE baseline
+		var y_off := map_bottom - float(sz - INSTR_FONT_SIZE) * 0.5
+		_draw_node.draw_string(font, Vector2(instr_x, y_off), p["text"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, sz, tint)
+		instr_x += font.get_string_size(p["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x
+
+	# Show input delay countdown as dim overlay text
+	if _input_delay > 0.0:
+		var remaining := ceilf(_input_delay)
+		_draw_node.draw_string(font, Vector2(vp.x * 0.5 - 20.0, map_bottom + 18.0),
+				"...", HORIZONTAL_ALIGNMENT_CENTER, 40.0, INSTR_FONT_SIZE,
+				Color(tint.r, tint.g, tint.b, 0.5))
 
 func _get_panel_name_for_room(room: Vector2i) -> String:
 	var rx0 := room.x * ROOM_W

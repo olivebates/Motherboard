@@ -45,6 +45,8 @@ const Y_SORT_GROUPS := [
 	"pass_blocks",
 	"keys",
 	"teleport_panels",
+	"screws",
+	"enemies",
 ]
 
 func _ready() -> void:
@@ -144,6 +146,15 @@ func _reset_room() -> void:
 		var kgp: Vector2i = key.start_grid_pos
 		if kgp.x >= rx0 and kgp.x < rx0 + ROOM_WIDTH and kgp.y >= ry0 and kgp.y < ry0 + ROOM_HEIGHT:
 			key.reset()
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if not is_instance_valid(enemy):
+			continue
+		var egp := Vector2i(floori(enemy._start_pos.x / TILE_SIZE), floori(enemy._start_pos.y / TILE_SIZE))
+		if egp.x >= rx0 and egp.x < rx0 + ROOM_WIDTH and egp.y >= ry0 and egp.y < ry0 + ROOM_HEIGHT:
+			if enemy.is_in_group("boss_spawned_enemies"):
+				enemy.queue_free()
+			else:
+				enemy.reset()
 	player.reset_to(room_entry_positions.get(current_room, Vector2i(2, 2)))
 	await reset_effect.done
 	player.unlock_movement()
@@ -278,8 +289,25 @@ func _transition_to_room(new_room: Vector2i) -> void:
 		p["node"].queue_free()
 	_update_beam()
 
+	# Delete boss-spawned enemies in the room being left
+	var old_rx0 = current_room.x * ROOM_WIDTH
+	var old_ry0 = current_room.y * ROOM_HEIGHT
+	for enemy in get_tree().get_nodes_in_group("boss_spawned_enemies"):
+		if not is_instance_valid(enemy):
+			continue
+		var egp = Vector2i(floori(enemy._start_pos.x / TILE_SIZE), floori(enemy._start_pos.y / TILE_SIZE))
+		if egp.x >= old_rx0 and egp.x < old_rx0 + ROOM_WIDTH and egp.y >= old_ry0 and egp.y < old_ry0 + ROOM_HEIGHT:
+			enemy.queue_free()
+
 	current_room = new_room
 	map_overlay.visit(current_room)
+
+	var erx0 := current_room.x * ROOM_WIDTH
+	var ery0 := current_room.y * ROOM_HEIGHT
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		var egp := Vector2i(floori(enemy._start_pos.x / TILE_SIZE), floori(enemy._start_pos.y / TILE_SIZE))
+		if egp.x >= erx0 and egp.x < erx0 + ROOM_WIDTH and egp.y >= ery0 and egp.y < ery0 + ROOM_HEIGHT:
+			enemy.reset()
 
 	var anchor := _get_anchor_for_room(new_room)
 	if anchor != null and anchor.color != modulate:

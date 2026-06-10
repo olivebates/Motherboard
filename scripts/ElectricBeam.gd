@@ -5,7 +5,7 @@ extends Node2D
 
 const POINT_COUNT := 12
 const WOBBLE_AMPLITUDE := 8.0
-const WOBBLE_SPEED := 6.0
+const WOBBLE_SPEED := 19
 const PHASE_POOL := POINT_COUNT * 20  # enough for many segments
 
 var waypoints: Array = []
@@ -98,6 +98,16 @@ func _rebuild_points() -> void:
 
 		line_main.add_point(b)
 		line_glow.add_point(b)
+
+func is_point_on_beam(point: Vector2, radius: float) -> bool:
+	var resolved := _resolve_waypoints()
+	if resolved.size() < 2:
+		return false
+	for i in range(resolved.size() - 1):
+		var closest := Geometry2D.get_closest_point_to_segment(point, resolved[i], resolved[i + 1])
+		if closest.distance_to(point) <= radius:
+			return true
+	return false
 
 func _draw() -> void:
 	if not active:

@@ -26,11 +26,13 @@ CAMERA_MARGIN = Vector2(16, 16)   (camera center offset from exact room center)
 - **Player, Prong** — root `Node2D` position is the **hitbox bottom** (Y-sort key). A `Body` child is offset upward so sprites stay tile-centered; see Y-Sorting below.
 - **PushBlock, Nut** → positioned at **tile top-left** (`col*32, row*32`); sprite at `(0, 0)`
 - Door, FloorPanel, LightningBlocker, KeyDoor, Key, PassBlock → positioned at **tile top-left**
+- **Enemy** → positioned at **tile top-left** (`col*32, row*32`); moves continuously from there
 
 **Sprite origin convention:** All sprites use `centered = false` (top-left origin).
 - Player / Prong: sprite on `Body` at `(-16, -16)` so it covers the tile when the body origin is at tile center
 - PushBlock / Nut: sprite at `(0, 0)` on the root node
 - Tile-top-left objects: sprite at `(0, 0)` fills the tile naturally
+- Enemy: sprite at `(0, 0)`; visual lag tracked via `_visual_pos` lerp (sprite offset applied each frame)
 
 ---
 
@@ -43,7 +45,9 @@ Godot Y-sorts by each node's `position.y` (higher Y = drawn in front). Walls use
 - At startup, gameplay nodes in `Y_SORT_GROUPS` are reparented under `Walls` (global transform preserved) so they sort in the same pass as wall tiles
 - New prongs are spawned as children of `wall_tilemap` directly
 
-**`Y_SORT_GROUPS`:** `players`, `prongs`, `doors`, `lightning_blockers`, `key_doors`, `push_blocks`, `pass_blocks`, `keys`, `teleport_panels`
+**`Y_SORT_GROUPS`:** `players`, `prongs`, `doors`, `lightning_blockers`, `key_doors`, `push_blocks`, `pass_blocks`, `keys`, `teleport_panels`, `screws`, `enemies`
+
+> **Rule:** Every new solid or interactive object added to the game must be added to `Y_SORT_GROUPS` (and `add_to_group` with a matching group name in its script) so it is reparented under `Walls` at startup and depth-sorts correctly against the player.
 
 **Depth rule:** compare actor **hitbox bottom** vs solid **tile top**.
 - Hitbox bottom below tile top (larger Y) → actor in front
@@ -85,13 +89,17 @@ scenes/
   AbilityGate.tscn         — Object hidden until a required ability is unlocked; TAB.png sprite
   TeleportPanel.tscn       — Interactive teleport panel; closed=solid, open=passable; exports: panel_name, one_way
   OnewayPanel.tscn         — TeleportPanel with one_way=true pre-set; player can teleport from it but not to it
+  Enemy.tscn               — Enemy that walks toward the player; Front_Idle1.png sprite; CPUParticles2D death burst
+  WaterEnemy.tscn          — WaterEnemy variant; uses WaterEnemy.gd; freezes when not in current room; supports boss_spawned flag
+  WaterBoss.tscn           — Boss enemy; uses WaterBoss.gd; 2000 HP at 2× scale; place at tile top-left in any room
+  BossDoor.tscn            — Solid door that permanently disappears when the boss dies; uses locked_door1.png; in "push_blocks" and "boss_doors" groups
 
 scripts/
   GameManager.gd           — Autoload singleton (puzzle state + ability tracking)
-  Main.gd                  — Root scene controller
+  Main.gd                  — Root scene controller; on room reset: boss_spawned_enemies in current room are queue_freed instead of reset; on room transition: boss_spawned_enemies in departing room are queue_freed
   Player.gd                — Player movement and input; exports start_with_push, start_with_chain
   Prong.gd                 — Prong placement logic
-  PushBlock.gd             — Push block with sprite-lag animation
+  PushBlock.gd             — Push block with sprite-lag animation; pushes enemies on contact
   ElectricBeam.gd          — Animated electricity beam (white, no transparency)
   Door.gd                  — Door open/close logic
   FloorPanel.gd            — Floor panel registration + circle-outline highlight + pulsing border highlight
@@ -100,7 +108,7 @@ scripts/
   ResetEffect.gd           — CRT static CanvasLayer effect for room reset
   KeyDoor.gd               — Solid door; counts Keys in same room, opens with shrink-to-center animation
   Key.gd                   — Collectible; shrinks to center on pickup, notifies KeyDoor
-  Nut.gd                   — Pushable conductor; beam routes through it when chain ability active
+  Nut.gd                   — Pushable conductor; beam routes through it when chain ability active; pushes enemies on contact
   Screw.gd                 — Static conductor; beam routes through it when chain ability active; cannot be pushed
   PassBlock.gd             — Passthrough block; solid to push blocks, transparent to player
   SplashScreen.gd          — Launch splash; black bg + credit text, dismissed by any key
@@ -113,6 +121,11 @@ scripts/
   AbilityMessage.gd        — CanvasLayer message overlay (layer 25); prompt appears after 2s
   AbilityGate.gd           — Node2D that hides its sprite until required_ability is granted
   AbilityTutorial.gd       — Autoload singleton; plays per-ability intro animations (sphere arcs, block/panel highlights)
+  Utils.gd                 — Autoload singleton; shared helpers (reusable boss health bar HUD)
+  Enemy.gd                 — Enemy; walks toward player, blocked by walls/solids, killed by beam, resets player on contact
+  WaterEnemy.gd            — Extends Enemy.gd; freezes movement when not in current room; boss_spawned flag auto-adds to "boss_spawned_enemies" group (deleted on room exit/reset instead of reset)
+  WaterBoss.gd             — Extends WaterEnemy.gd; 2× scale, 2000 HP; @export var debug_low_hp: bool sets HP to 10 at start if true; boss health bar via Utils (visible in boss home room when alive); takes 1 dmg/frame from beam (shake 1.0) + freeze-frame on first contact each exposure; teleports to random free tile (≥5 tiles from player, ≥2 tiles from room border) after 1.5s in beam; sprite slides to new position on teleport; speed scales with HP loss (BASE=40→MAX=100); spawns two WaterEnemy minions 3 tiles out below 80% HP with 0.7s scale-pulse telegraph (interval scales 4s→2s as HP drops, skips spawn if within 64px of player); charge attack: cooldown 3s, triggers when player within 5 tiles — 1s squash/stretch wind-up, then lunges at 240 px/s decelerating to normal speed; teleport mid-windup resets cooldown; phase 2 at 50% HP: screen shake + brief pause; death: series of 3 extreme shakes (0.5s apart), minion water_enemies in room deleted immediately (boss skips self in that loop), boss freezes 1s then arcs off screen in a parabola at z_index=100 with a slight rotation (dir * p * 0.8 rad) — doors open and particles fire once boss exits room bounds; sprite lag at half enemy speed (BOSS_SPRITE_SPEED=10); no modulation effects
+  BossDoor.gd              — Solid tile object in "push_blocks" and "boss_doors" groups; provides grid_pos/start_grid_pos computed from position; open() called by WaterBoss on death → queue_free(); reset() also frees if already opened (permanent removal)
 
 Sprites/
   placeholder.png          — 32×32 RGBA placeholder
@@ -131,6 +144,7 @@ Sprites/
   TAB.png                  — AbilityGate sprite
   teleport_closed.gif      — TeleportPanel closed/solid sprite
   teleport_open.png        — TeleportPanel open/passable sprite
+  Front_Idle1.png          — Enemy sprite
 ```
 
 ---
@@ -177,20 +191,20 @@ Sprites/
 - `ability_message: Node` — `AbilityMessage` CanvasLayer instance; exposed for `AbilityPickup` to call `show_message()`
 
 **Key functions:**
-- `_setup_y_sort_children()` — enables Y-sort on `Walls`, reparents `Y_SORT_GROUPS` nodes under `wall_tilemap`. Screws are NOT in `Y_SORT_GROUPS` and are not reparented; they are static solids checked via `_is_static_solid()` using the `"screws"` group
+- `_setup_y_sort_children()` — enables Y-sort on `Walls`, reparents `Y_SORT_GROUPS` nodes under `wall_tilemap`. Screws are in `Y_SORT_GROUPS` and are reparented like other solids; they are also checked via `_is_static_solid()` using the `"screws"` group
 - `_process(delta)` — shake decay → `camera.offset`
 - `_trigger_shake(strength)` — sets `_shake_amount`; connected to `GameManager.shake_requested`
 - `_update_beam()` — checks blockers, sets `GameManager.beam_blocked`, calls `evaluate_puzzle()`, activates/deactivates beam
 - `spawn_prong(pixel_pos)` — `pixel_pos` is hitbox center; if 2 prongs already exist, oldest is removed with shrink animation before placing new one (no "clear both" behaviour)
-- `_reset_room()` — locks player → ResetEffect fades in → awaits `peaked` → resets room state → awaits `done` → unlocks player
-- `_transition_to_room(new_room)` — clears prongs instantly, tweens camera 0.25s
+- `_reset_room()` — locks player → ResetEffect fades in → awaits `peaked` → resets room state (prongs, push blocks, key doors, keys, enemies) → awaits `done` → unlocks player
+- `_transition_to_room(new_room)` — clears prongs instantly, resets enemies in new room, tweens camera 0.25s
 - `check_room_transition(player_grid, player_pixel)` — uses `floori` division; downward and rightward transitions require player pixel position to be 24px past the boundary before firing
 - `tile_rect(grid_pos)` → `Rect2` — 32×32 world rect for a grid tile
 - `_is_static_solid(grid_pos)` — walls, closed doors, lightning blockers, key doors, closed teleport panels, screws (NOT push blocks, NOT pass blocks)
 - `is_blocked(grid_pos)` — static solids + push blocks (used for grid queries elsewhere)
 - `can_teleport_from_panel()` → `bool` — true if player is on an open panel, at least 2 total open panels exist (including one-ways), and at least one non-one-way destination exists; used for TAB prompt and teleport mode activation
 - `get_open_teleport_panel_rooms()` — returns rooms with open non-one-way TeleportPanels (destinations only)
-- `get_player_blocking_rects(area)` → `Array[Rect2]` — static tile rects + push-block rects overlapping `area`; used by player AABB movement
+- `get_player_blocking_rects(area)` → `Array[Rect2]` — static tile rects + push-block rects overlapping `area`; used by player and enemy AABB movement
 - `can_push_block_to(grid_pos)` — false if static solid, push block, or pass block occupies tile
 - `get_push_block_at_face(player_rect, dir, from_point)` → `Node` — among push blocks flush against `player_rect` on the given face, returns the one whose center is closest to `from_point`
 - `has_pass_block_at(grid_pos)` — checks pass_blocks group
@@ -207,7 +221,7 @@ Sprites/
 ### Player.gd (Node2D)
 **Purpose:** Free pixel-based movement, push input, and prong placement.
 
-**Constants:** `SPEED=272 px/s`, `SPRITE_SPEED=20.0`, `CONTACT_EPS=0.1`, `PUSH_FREEZE=0.15`
+**Constants:** `SPEED=217.6 px/s` (20% reduced from original 272), `SPRITE_SPEED=24.0`, `CONTACT_EPS=0.1`, `PUSH_FREEZE=0.15`
 
 **Scene structure:** Root `Node2D` (script) → `Body` → `Sprite2D` + `Hitbox`. Root `position` = **hitbox bottom** (Y-sort + movement anchor). `Body` holds visuals/collision at tile-centered layout.
 
@@ -219,7 +233,7 @@ Sprites/
 
 **Startup ability grants:** `@export var start_with_push: bool` and `@export var start_with_chain: bool` — if true, the corresponding ability is granted via `GameManager.grant_ability()` in `_ready()` without requiring a pickup.
 
-**Key functions:** `get_body_center()` → hitbox center world pos; `_hitbox_rect(pos)`, `_sprite_center()`, `_grid_to_world()` / `_world_to_grid()`, `reset_to(gp)`, `_try_push()`, `_start_push_lock(dir)`
+**Key functions:** `get_body_center()` → hitbox center world pos; `_hitbox_rect(pos)`, `_sprite_center()`, `_grid_to_world()` / `_world_to_grid()`, `reset_to(gp)`, `_try_push()`, `_start_push_lock(dir)`, `eject_from_solid()` — BFS from current grid pos to nearest free tile; called every frame in `_process` and at end of `reset_to`
 
 **References `Main` via `get_tree().current_scene`** (not `get_parent()`), because the player is reparented under `Walls` at runtime.
 
@@ -237,6 +251,8 @@ Sprites/
 ### Nut.gd (Node2D)
 **Purpose:** Pushable conductor. Identical push/reset behaviour to PushBlock (tile top-left node, `SPRITE_OFFSET = (0, 0)`) but also in `"nuts"` group. After slide tween, calls `Main._update_beam()` via `get_tree().current_scene`. `get_beam_point()` returns sprite center. `get_collision_rect()` → 32×32 world `Rect2`. Beam routes through Nuts only when `GameManager.has_ability("chain")`.
 
+**Enemy interaction:** `push(direction)` checks for enemies whose center tile matches the new `grid_pos` and calls `enemy.push(direction)` on them, same as PushBlock.
+
 ---
 
 ### Screw.gd (Node2D)
@@ -250,7 +266,7 @@ Sprites/
 - Node at **tile top-left**; `SPRITE_OFFSET = (0, 0)`; `_grid_to_world(gp)` → `(gp.x * 32, gp.y * 32)`
 - `_ready()` — infers `start_grid_pos` from editor placement, snaps to tile top-left
 - `get_collision_rect()` → 32×32 world `Rect2` for player collision/push queries
-- `push(direction)` — teleports node, slides sprite from old position; if highlighted, clears all highlights first
+- `push(direction)` — teleports node, slides sprite from old position; checks for enemies in new tile and pushes them; if highlighted, clears all highlights first
 - `reset()` — restores `start_grid_pos`, snaps sprite, clears highlight
 - `set_highlight(val)` — enables/disables the pulsing white border drawn via `_draw()`
 - `_draw()` — when highlighted, draws an unfilled white rectangle around the block with a ±1px oscillating offset (`sin(time * PI)`, one cycle/s)
@@ -271,10 +287,11 @@ Sprites/
 **Purpose:** Animated electricity visual. `z_index = 10`.
 
 - Beam is **white**, fully opaque. Glow Line2D is hidden (`line_glow.visible = false`)
-- Beam width pulses via `sin(time * 8)`. Endpoint glow circles drawn white in `_draw()`
+- Beam width pulses via `sin(time * 8)`. Endpoint glow circles drawn white in `_draw()`. `WOBBLE_SPEED = 19` (oscillates fast)
 - All waypoint positions are offset by `Vector2(0, -4)` in `_resolve_waypoints()` so the beam renders 4px above each node's origin
 - `activate(points)` — ordered list: prong A → nuts → prong B
 - `deactivate()` — hides beam
+- `is_point_on_beam(point, radius)` → `bool` — returns true if `point` is within `radius` pixels of any beam segment; used by Enemy to detect beam contact
 
 ---
 
@@ -374,6 +391,25 @@ Sprites/
 
 ---
 
+### Utils.gd (autoload singleton, Node)
+**Purpose:** Shared helpers used across the project. Currently provides a reusable boss health bar HUD.
+
+**Constants:** `BAR_MARGIN=10`, `BAR_H=16`, `BAR_OUTLINE=2`, `BAR_LAYER=25`
+
+**Key variables:**
+- `_bars: Dictionary` — keyed by boss `get_instance_id()`; each entry holds `{canvas, outer, fill, bar_w}`
+
+**Boss health bar:** `CanvasLayer` (layer 25) with four stacked `ColorRect`s (colored outer frame, black inner frame, black background, colored fill). Bar width = viewport width minus `2 × BAR_MARGIN`. Tint color is passed in per update (bosses use `Main.modulate`). Canvas is parented to `Main`, not the boss node, so it survives Y-sort reparenting under `Walls`.
+
+**Key functions:**
+- `create_boss_health_bar(boss, main)` — registers a bar for `boss`; call deferred from boss `_ready()` after reparent
+- `update_boss_health_bar(boss, hp, max_hp, visible, tint)` — sets visibility and fill ratio
+- `remove_boss_health_bar(boss)` — frees canvas; call from boss `NOTIFICATION_PREDELETE`
+
+**Boss integration pattern:** `_ready()` → `call_deferred("_register_health_bar")` → `Utils.create_boss_health_bar(self, _main)`; `_process()` → `Utils.update_boss_health_bar(...)`; `_notification(PREDELETE)` → `Utils.remove_boss_health_bar(self)`.
+
+---
+
 ### AbilityGate.gd (Node2D)
 - `@export var required_ability: String = "push"`
 - Sprite starts hidden; `_process` shows it as soon as `GameManager.has_ability(required_ability)` returns true
@@ -402,14 +438,18 @@ Sprites/
 **Purpose:** Map/teleport overlay opened by TAB. Slides in/out from the top of the screen (0.15s SINE tween). Mode is determined at open time based on player state.
 
 **Modes:**
-- **Teleport mode** — player is on an open TeleportPanel and at least one non-one-way destination exists (`Main.can_teleport_from_panel()`). Cursor navigates between destination rooms; WASD snaps cursor to nearest destination; Space teleports. Instructions always show "WASD: Move  Space: Teleport  TAB: Close".
+- **Teleport mode** — player is on an open TeleportPanel and at least one non-one-way destination exists (`Main.can_teleport_from_panel()`). Cursor navigates between destination rooms; WASD/Arrow keys snap cursor to nearest destination; Space teleports.
 - **Map-only mode** — TAB pressed elsewhere (or no destinations). No cursor, no navigation. Instructions: "TAB: Close"
 
-**Key variables:** `_teleport_mode: bool`, `_open_panel_rooms: Array` (destinations only), `_visited: Dictionary`, `_cursor: Vector2i`, `_slide_tween: Tween`
+**Key variables:** `_teleport_mode: bool`, `_open_panel_rooms: Array` (destinations only), `_visited: Dictionary`, `_cursor: Vector2i`, `_slide_tween: Tween`, `_pulse_timer: float`, `_pulse_large: bool`, `_space_hint_done: bool`, `_wasd_hint_done: bool`, `_first_two_done: bool`, `_input_delay: float`, `_first_teleport_room: Vector2i`, `_first_teleport_room_set: bool`
 
-**Visual style:** Background is a fitted solid-black box with a tint-colored 2px border. Box width expands to fit the widest of: room grid, instruction text, or panel name text. Box top expands upward when a panel name is present. All rooms, connections, and stubs drawn in `Main.modulate` tint. Rooms with an open destination panel show a black dot at center. In teleport mode, cursor room has a 1px tint outline offset 1px outward on all sides (2px extra on right/bottom). Panel name drawn in tint above rooms; instructions in tint below. TAB prompt and teleport mode require ≥2 total open panels (any type) and ≥1 non-one-way destination. Unvisited rooms with open panels are shown on the map. All text uses tint color.
+**Hint pulsing:** "Space: Teleport" pulses font size 11↔12 every 0.5s until the player teleports. "WASD/Arrow Keys: Move" pulses the same way until the player teleports to any room that is not `_first_teleport_room`. Both start at large size (`_pulse_large = true`) when the map opens. Pulsing is driven in `_process`; hints are drawn as inline segments so each can have an independent font size.
 
-**Connections:** `_has_exit(room, dir)` — checks for at least one non-wall tile on the border; right/down checks the first column/row of the neighbour room. Connections only drawn between visited rooms that have an exit between them.
+**First-open delay:** The first time the map opens with ≥2 teleport destinations, all input is blocked for 1 second (`_input_delay = 1.0`). A faint `...` is shown below the instructions during the delay.
+
+**Visual style:** Background is a solid-black box with a tint-colored 2px border. Minimum size is half the viewport (400×192). Box expands to fit the widest of: room grid, instruction text, or panel name text, and expands symmetrically in height if needed. All rooms, connections, stubs, and text drawn in `Main.modulate` tint. Rooms with an open destination panel show a black dot at center. Cursor room has a 1px tint outline. Panel name drawn above rooms; instruction segments drawn inline below, centered as a group. All text uses tint color.
+
+**Connections:** `_has_exit(room, dir)` — checks for at least one non-wall tile on the border. Connections drawn between visited rooms that have an exit between them.
 
 ---
 
@@ -429,6 +469,28 @@ Sprites/
 
 ---
 
+### Enemy.gd (Node2D)
+**Purpose:** Enemy that slowly walks toward the player in a straight line, blocked by walls and solids, killed by the electric beam, and resets the room on player contact.
+
+**Constants:** `SPEED=40.0 px/s`, `SPRITE_SPEED=20.0`, `CONTACT_DIST=14.0`, `BEAM_RADIUS=14.0`, `TILE_SIZE=32`, `CONTACT_EPS=0.1`
+
+**Hitbox:** 20×20, offset `(6, 6)` from position (slightly inset from the 32×32 sprite). Used for AABB wall collision via `Main.get_player_blocking_rects()`.
+
+**Sprite lag:** `_visual_pos` lerps toward `position` each frame; `_sprite.position = _visual_pos - position` applies the lag offset. When pushed by a block, `position` teleports instantly while `_visual_pos` slides to catch up.
+
+**Key functions:**
+- `get_center()` → `position + Vector2(16, 16)`
+- `_move_x(dx)` / `_move_y(dy)` — axis-separated AABB movement against `Main.get_player_blocking_rects()`
+- `push(dir)` — displaces `position` by `dir * TILE_SIZE`; sprite lag produces the slide visual
+- `_die()` — hides sprite, fires particle burst (`one_shot=true`, `explosiveness=1.0` set in `_ready()`); enemy stays dead until `reset()` is called
+- `reset()` — restores position, visual pos, sprite visibility; called by `Main._reset_room()` and `Main._transition_to_room()`
+
+**Reset triggers:** room restart (R / player contact), room entry (transition to the enemy's room).
+
+**Group:** `"enemies"`; in `Y_SORT_GROUPS` so reparented under `Walls` at startup.
+
+---
+
 ## Scenes (Node Structures)
 
 ```
@@ -436,7 +498,7 @@ Main.tscn (runtime Y-sort):
   Main [Main.gd, y_sort_enabled=false]
   ├── Walls [TileMapLayer, y_sort_enabled=true, y_sort_origin=0 per tile]
   │     ├── Player, Prong(s), Door(s), LightningBlocker(s), KeyDoor(s),
-  │     │   PushBlock(s), Nut(s), PassBlock(s), Key(s)  ← reparented at _ready
+  │     │   PushBlock(s), Nut(s), PassBlock(s), Key(s), Enemy(s)  ← reparented at _ready
   │     └── (wall tile cells)
   ├── Camera2D, ElectricBeam, FloorPanel(s), UI sprites, …
 
@@ -519,6 +581,15 @@ Screw.tscn:
   ├── Area2DRight [Area2D] → CollisionShapeRight [CollisionShape2D]
   ├── Area2DUp    [Area2D] → CollisionShapeUp    [CollisionShape2D]
   └── Area2DDown  [Area2D] → CollisionShapeDown  [CollisionShape2D]
+
+Enemy.tscn:
+  Node2D [Enemy.gd]  ← position at tile top-left; moves continuously
+  ├── Sprite2D [Front_Idle1.png, centered=false]
+  └── Particles [CPUParticles2D — one_shot, explosiveness=1.0, white arc burst on death]
+
+BossDoor.tscn:
+  Node2D [BossDoor.gd]
+  └── Sprite2D [locked_door1.png, centered=false]
 ```
 
 ---
@@ -541,6 +612,8 @@ All objects use `centered = false`.
 | PassBlock | switch_open2.png | tile top-left |
 | AbilityPickup | (drawn via _draw) | tile top-left |
 | AbilityGate | TAB.png | tile top-left |
+| Enemy / WaterEnemy / WaterBoss | Front_Idle1.png | tile top-left (moves continuously) |
+| BossDoor | locked_door1.png | tile top-left |
 
 Floor: black `Color(0, 0, 0)` drawn in `Main._draw()`. Background: black.
 
@@ -561,11 +634,17 @@ Player presses Space:
 Player presses R:
   → lock player → ResetEffect.play()
   → static fades in (0.28s) → holds at 100% (0.2s) → peaked signal
-  → peaked: delete room prongs, reset push blocks, reset key doors/keys, teleport player
+  → peaked: delete room prongs, reset push blocks, reset key doors/keys, reset enemies, teleport player
   → static fades out (0.22s) → done signal → unlock player
 
 Room transition (player walks to edge):
-  → clear prongs instantly → camera tweens 0.25s → player locked during tween
+  → clear prongs instantly → reset enemies in new room → camera tweens 0.25s → player locked during tween
+
+Enemy touches player:
+  → _reset_room() triggered (same as pressing R)
+
+Enemy enters beam:
+  → enemy hides sprite, plays one-shot particle burst; stays dead until room reset or re-entry
 ```
 
 ---
@@ -604,6 +683,7 @@ Room transition (player walks to edge):
 | Prong clear animation (shrink to top-center) | Prong.gd `apply_clear_shrink()`, Main.gd `spawn_prong()` |
 | Y-sort depth (hitbox bottom vs tile top) | Main.gd `_setup_y_sort_children()`, YSortHitboxBottom.gd |
 | Sprite lag on player move | Player.gd `visual_pos` lerp on `Body/Sprite2D` |
+| Sprite lag on enemy move | Enemy.gd `_visual_pos` lerp on `Sprite2D` |
 | Push block sprite slide | PushBlock.gd `push()` |
 | Push directional freeze (0.15s, push axis only) | Player.gd `_start_push_lock()` |
 | Closest-block push selection | Main.gd `get_push_block_at_face()` |
@@ -624,3 +704,5 @@ Room transition (player walks to edge):
 | Map overlay slides in/out from top (0.15s SINE) | MapOverlay.gd `_open_map()` / `_close_map()` |
 | Floor panel pulsing border highlight (chain tutorial) | FloorPanel.gd `set_highlight()` |
 | Ability intro sphere arcs (push → blocks, chain → panels) | AbilityTutorial.gd |
+| Boss health bar HUD (top of screen, room-tinted) | Utils.gd `create/update_boss_health_bar()`; WaterBoss.gd |
+| Enemy particle burst on beam death | Enemy.gd `_die()`, CPUParticles2D one-shot burst |
