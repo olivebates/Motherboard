@@ -3,10 +3,11 @@ extends Node
 const AUTOSAVE_INTERVAL = 5.0
 const SAVE_DIR = "user://"
 
-var active_slot: int = -1
+var active_slot: int = 1
 var _autosave_timer: float = 0.0
 var _pending_data: Dictionary = {}
 var skip_splash: bool = false
+var _save_system_enabled: bool = false
 
 # Accumulated during gameplay (nodes that get freed need pre-death notification)
 var _key_doors_opened: Array = []   # Array of [gx, gy]
@@ -49,6 +50,8 @@ func _process(delta: float) -> void:
 		save(active_slot)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not _save_system_enabled:
+		return
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var digit := _keycode_to_digit(event.keycode)
@@ -67,6 +70,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			active_slot = -1
 			_autosave_timer = 0.0
 		return
+	if event.alt_pressed:
+		# Select slot without loading
+		if active_slot != digit:
+			active_slot = digit
+			_autosave_timer = 0.0
+		_show_status("Slot %d selected" % digit)
+		return
 	if active_slot != digit:
 		active_slot = digit
 		_autosave_timer = 0.0
@@ -77,6 +87,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_show_status("Slot %d selected (empty)" % digit)
 
 func on_player_ready(save_enabled: bool) -> void:
+	_save_system_enabled = save_enabled
 	if save_enabled:
 		return
 	# Auto-mode: always use slot 1
@@ -84,9 +95,6 @@ func on_player_ready(save_enabled: bool) -> void:
 		return  # already set (e.g. we just loaded from slot 1)
 	active_slot = 1
 	_autosave_timer = 0.0
-	var path := SAVE_DIR + "save_slot_1.json"
-	if FileAccess.file_exists(path):
-		call_deferred("load_slot", 1)
 
 func _keycode_to_digit(keycode: Key) -> int:
 	match keycode:
@@ -199,6 +207,7 @@ func _apply_load(data: Dictionary) -> void:
 	var room_arr = data.get("current_room", [0, 0])
 	main.current_room = Vector2i(int(room_arr[0]), int(room_arr[1]))
 	main.camera.position = _room_center(main.current_room)
+	main.set_entry_position_from_anchor(main.current_room)
 
 	# Player position + ensure movement is unlocked
 	var pos_arr = data.get("player_pos", [0.0, 0.0])

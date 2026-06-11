@@ -15,6 +15,7 @@ var current_room := Vector2i(0, 0)
 var room_entry_positions: Dictionary = {}
 var _cam_tween: Tween = null
 var _shake_amount := 0.0
+var _resetting := false
 
 @onready var player: Node2D = $Player
 @onready var camera: Camera2D = $Camera2D
@@ -80,6 +81,7 @@ func _ready() -> void:
 	if start_anchor != null:
 		modulate = start_anchor.color
 		reset_effect.color = modulate
+		room_entry_positions[current_room] = Vector2i(floori(start_anchor.position.x / TILE_SIZE), floori(start_anchor.position.y / TILE_SIZE))
 	if not SaveManager.skip_splash:
 		var splash := SplashScreenScene.new()
 		add_child(splash)
@@ -126,6 +128,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_reset_room()
 
 func _reset_room() -> void:
+	if _resetting:
+		return
+	_resetting = true
 	player.lock_movement()
 	reset_effect.play()
 	await reset_effect.peaked
@@ -160,6 +165,7 @@ func _reset_room() -> void:
 				enemy.reset()
 	player.reset_to(room_entry_positions.get(current_room, Vector2i(2, 2)))
 	await reset_effect.done
+	_resetting = false
 	player.unlock_movement()
 
 func tile_rect(grid_pos: Vector2i) -> Rect2:
@@ -329,6 +335,11 @@ func _transition_to_room(new_room: Vector2i) -> void:
 	_cam_tween.set_trans(Tween.TRANS_SINE)
 	_cam_tween.tween_property(camera, "position", target, CAMERA_TWEEN_DURATION)
 	_cam_tween.finished.connect(func(): player.unlock_movement())
+
+func set_entry_position_from_anchor(room: Vector2i) -> void:
+	var anchor := _get_anchor_for_room(room)
+	if anchor != null:
+		room_entry_positions[room] = Vector2i(floori(anchor.position.x / TILE_SIZE), floori(anchor.position.y / TILE_SIZE))
 
 func _get_anchor_for_room(room: Vector2i) -> Node:
 	var rx0 := room.x * ROOM_WIDTH

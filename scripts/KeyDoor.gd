@@ -17,7 +17,10 @@ func _room_of(pos: Vector2) -> Vector2i:
 	return Vector2i(floori(pos.x / 800.0), floori(pos.y / 384.0))
 
 func _count_keys() -> void:
-	var my_room := _room_of(position)
+	if get_tree() == null:
+		call_deferred("_count_keys")
+		return
+	var my_room := _room_of(global_position)
 	for key in get_tree().get_nodes_in_group("keys"):
 		if _room_of(key.position) == my_room:
 			_keys_total += 1

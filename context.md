@@ -90,15 +90,15 @@ scenes/
   TeleportPanel.tscn       — Interactive teleport panel; closed=solid, open=passable; exports: panel_name, one_way
   OnewayPanel.tscn         — TeleportPanel with one_way=true pre-set; player can teleport from it but not to it
   Enemy.tscn               — Enemy that walks toward the player; Front_Idle1.png sprite; CPUParticles2D death burst
-  WaterEnemy.tscn          — WaterEnemy variant; uses WaterEnemy.gd; freezes when not in current room; supports boss_spawned flag
+  WaterEnemy.tscn          — WaterEnemy variant; uses WaterEnemy.gd; freezes when not in current room or when map overlay is open; ejects from solids each frame; supports boss_spawned flag
   WaterBoss.tscn           — Boss enemy; uses WaterBoss.gd; 2000 HP at 2× scale; place at tile top-left in any room
   BossDoor.tscn            — Solid door that permanently disappears when the boss dies; uses locked_door1.png; in "boss_doors" group only (NOT push_blocks — has no push() method)
-  TimedObject.tscn         — Object that appears after 2 minutes in its room (chain upgrade not yet acquired); hides and resets timer on each room entry; always hidden once chain is acquired; Sprite2D child provides the visual
+  TimedObject.tscn         — Object that appears after 2 minutes in its room (chain upgrade not yet acquired); blinks every 0.5s while visible; slows player speed to 80% while visible; hides, restores speed, and resets timer on each room entry; always hidden once chain is acquired; uses arrow_up.png sprite
 
 scripts/
   GameManager.gd           — Autoload singleton (puzzle state + ability tracking)
-  Main.gd                  — Root scene controller; on room reset: boss_spawned_enemies in current room are queue_freed instead of reset; on room transition: boss_spawned_enemies in departing room are queue_freed; skips splash screen when SaveManager.skip_splash is true
-  Player.gd                — Player movement and input; exports start_with_push, start_with_chain, save_system_enabled; calls SaveManager.on_player_ready() at end of _ready()
+  Main.gd                  — Root scene controller; on room reset: boss_spawned_enemies in current room are queue_freed instead of reset; on room transition: boss_spawned_enemies in departing room are queue_freed; skips splash screen when SaveManager.skip_splash is true; TAB label above player has black outline (outline_size=2)
+  Player.gd                — Player movement and input; exports start_with_push, start_with_chain, save_system_enabled; calls SaveManager.on_player_ready() at end of _ready(); var speed_multiplier: float = 1.0 scales movement (set by TimedObject)
   SaveManager.gd           — Autoload singleton; save/load system; autosaves every 5s to active slot; 1–9 selects slot (loads if file exists); Shift+1–9 deletes that slot; save_system_enabled=false on Player auto-activates slot 1 and loads it on start; reloads scene on load (skip_splash=true); tracks key_doors_opened, boss_doors_opened, boss_defeated for permanently-freed nodes; status label (top-left, fades after 1.5s) for slot feedback; save files at user://save_slot_N.json
   Prong.gd                 — Prong placement logic
   PushBlock.gd             — Push block with sprite-lag animation; pushes enemies on contact
@@ -108,14 +108,14 @@ scripts/
   LightningBlocker.gd      — Lightning blocker; alternates textures when active
   WallTileMap.gd           — TileMapLayer script for painting walls in-editor
   ResetEffect.gd           — CRT static CanvasLayer effect for room reset
-  KeyDoor.gd               — Solid door; counts Keys in same room, opens with shrink-to-center animation; _open() calls SaveManager.notify_key_door_opened() before removing self from group
+  KeyDoor.gd               — Solid door; counts Keys in same room, opens with shrink-to-center animation; opens immediately on _count_keys() if room has zero keys; _open() calls SaveManager.notify_key_door_opened() before removing self from group
   Key.gd                   — Collectible; shrinks to center on pickup, notifies KeyDoor
   Nut.gd                   — Pushable conductor; beam routes through it when chain ability active; pushes enemies on contact
   Screw.gd                 — Static conductor; beam routes through it when chain ability active; cannot be pushed
   PassBlock.gd             — Passthrough block; solid to push blocks, transparent to player
   SplashScreen.gd          — Launch splash; black bg + credit text, dismissed by any key
   YSortHitboxBottom.gd     — Hitbox-bottom Y-sort helpers (Player, Prong)
-  MapOverlay.gd            — Map overlay UI (TAB to open); slides in/out from top; teleport mode requires push ability
+  MapOverlay.gd            — Map overlay UI (TAB to open); slides in/out from top; teleport mode requires push ability; title always shows "The Map" in both modes; pressing Space on the player's current room does nothing
   TeleportAnchor.gd        — Room teleport anchor markers (legacy fallback; TeleportPanel is now the primary teleport mechanic)
   TeleportPanel.gd         — Interactive teleport panel; closed=solid (player pushes 0.2s to open); open=passable floor; screenshake on open; exports panel_name (shown on map) and one_way (excludes from destinations)
   OnewayPanel.gd           — (uses TeleportPanel.gd) TeleportPanel with one_way=true; source-only teleporter
@@ -123,12 +123,12 @@ scripts/
   AbilityMessage.gd        — CanvasLayer message overlay (layer 25); prompt appears after 2s
   AbilityGate.gd           — Node2D that hides its sprite until required_ability is granted
   AbilityTutorial.gd       — Autoload singleton; plays per-ability intro animations (sphere arcs, block/panel highlights)
-  Utils.gd                 — Autoload singleton; shared helpers (reusable boss health bar HUD); remove_boss_health_bar uses untyped canvas var + erases dict entry before queue_free to avoid freed-instance crash on scene reload
-  Enemy.gd                 — Enemy; walks toward player, blocked by walls/solids, killed by beam, resets player on contact
-  WaterEnemy.gd            — Extends Enemy.gd; freezes movement when not in current room; boss_spawned flag auto-adds to "boss_spawned_enemies" group (deleted on room exit/reset instead of reset)
-  WaterBoss.gd             — Extends WaterEnemy.gd; 2× scale, 2000 HP; @export var debug_low_hp: bool sets HP to 10 at start if true; boss health bar via Utils (visible in boss home room when alive); takes 1 dmg/frame from beam (shake 1.0) + freeze-frame on first contact each exposure; teleports to random free tile (≥5 tiles from player, ≥2 tiles from room border) after 1.5s in beam; sprite slides to new position on teleport; speed scales with HP loss (BASE=40→MAX=100); spawns two WaterEnemy minions 3 tiles out below 80% HP with 0.7s scale-pulse telegraph (interval scales 4s→2s as HP drops, skips spawn if within 64px of player); charge attack: cooldown 3s, triggers when player within 5 tiles — 1s squash/stretch wind-up, then lunges at 240 px/s decelerating to normal speed; teleport mid-windup resets cooldown; phase 2 at 50% HP: screen shake + brief pause; death: series of 3 extreme shakes (0.5s apart), minion water_enemies in room deleted immediately (boss skips self in that loop), boss freezes 1s then arcs off screen in a parabola at z_index=100 with a slight rotation (dir * p * 0.8 rad) — doors open and particles fire once boss exits room bounds; sprite lag at half enemy speed (BOSS_SPRITE_SPEED=10); no modulation effects
-  BossDoor.gd              — Solid tile object in "boss_doors" group only; provides grid_pos/start_grid_pos computed from position; open() calls SaveManager.notify_boss_door_opened() then queue_free(); reset() also frees if already opened (permanent removal)
-  TimedObject.gd           — Node2D that tracks per-room-visit time; sprite appears after 120s if player lacks chain ability; resets (hides + clears timer) each time the player enters its room; always hidden after chain ability granted; requires Sprite2D child named "Sprite2D"
+  Utils.gd                 — Autoload singleton; shared helpers (reusable boss health bar HUD); remove_boss_health_bar uses untyped canvas var + erases dict entry before queue_free to avoid freed-instance crash on scene reload; shake_boss_health_bar() tweens canvas offset ±2px horizontally + random ±2px vertically (debounced); CPUParticles2D at fill tip bursts top-right on each shake
+  Enemy.gd                 — Enemy; walks toward player, blocked by walls/solids, killed by beam, resets player on contact; _eject_from_solid() BFS-finds nearest free tile when inside a solid
+  WaterEnemy.gd            — Extends Enemy.gd; freezes movement when not in current room or when map overlay is open; calls _eject_from_solid() each frame; boss_spawned flag auto-adds to "boss_spawned_enemies" group (deleted on room exit/reset instead of reset)
+  WaterBoss.gd             — Extends WaterEnemy.gd; 2× scale, 2000 HP; @export var debug_low_hp: bool sets HP to 10 at start if true; boss health bar via Utils (visible in boss home room when alive); takes 1 dmg/frame from beam (shake 1.0 + health bar shake+particles) + freeze-frame on first contact each exposure; teleports to random free tile (≥5 tiles from player, ≥2 tiles from room border) after 1.5s in beam; sprite slides to new position on teleport; speed scales with HP loss (BASE=40→MAX=100); spawns two WaterEnemy minions 3 tiles out below 80% HP with 0.7s scale-pulse telegraph (interval scales 4s→2s as HP drops, skips spawn if within 96px of player); charge attack: cooldown 3s, triggers when player within 5 tiles — 1s squash/stretch wind-up, then lunges at 240 px/s decelerating to normal speed; teleport mid-windup resets cooldown; phase 2 at 50% HP: screen shake + brief pause; death: series of 3 extreme shakes (0.5s apart), minion water_enemies in room deleted immediately (boss skips self in that loop), boss freezes 1s then arcs off screen in a parabola at z_index=100 with a slight rotation (dir * p * 0.8 rad) — doors open and particles fire once boss exits room bounds; sprite lag at half enemy speed (BOSS_SPRITE_SPEED=10); no modulation effects
+  BossDoor.gd              — Solid tile object in "boss_doors" group only (NOT push_blocks — has no push() method); provides grid_pos/start_grid_pos computed from position; open() calls SaveManager.notify_boss_door_opened() then queue_free(); reset() also frees if already opened (permanent removal)
+  TimedObject.gd           — Node2D that tracks per-room-visit time; sprite (arrow_up.png) appears after 120s if player lacks chain ability; blinks every 0.5s while visible; sets player.speed_multiplier=0.8 while showing; resets (hides, restores speed, clears timer) each time the player enters its room; always hidden after chain ability granted; requires Sprite2D child named "Sprite2D"
 
 Sprites/
   placeholder.png          — 32×32 RGBA placeholder
@@ -240,6 +240,8 @@ Sprites/
 **Startup ability grants:** `@export var start_with_push: bool` and `@export var start_with_chain: bool` — if true, the corresponding ability is granted via `GameManager.grant_ability()` in `_ready()` without requiring a pickup.
 
 **Save system:** `@export var save_system_enabled: bool = false`. If `false`, SaveManager auto-activates slot 1 and loads it on start. If `true`, the player manually picks a slot with 1–9. `SaveManager.on_player_ready(save_system_enabled)` is called at the end of `_ready()`.
+
+**Key variables:** `speed_multiplier: float = 1.0` — scales movement velocity; set to `0.8` by TimedObject while it is visible, restored to `1.0` when it hides.
 
 **Key functions:** `get_body_center()` → hitbox center world pos; `_hitbox_rect(pos)`, `_sprite_center()`, `_grid_to_world()` / `_world_to_grid()`, `reset_to(gp)`, `_try_push()`, `_start_push_lock(dir)`, `eject_from_solid()` — BFS from current grid pos to nearest free tile; called every frame in `_process` and at end of `reset_to`
 
@@ -405,16 +407,26 @@ Sprites/
 **Constants:** `BAR_MARGIN=10`, `BAR_H=16`, `BAR_OUTLINE=2`, `BAR_LAYER=25`
 
 **Key variables:**
-- `_bars: Dictionary` — keyed by boss `get_instance_id()`; each entry holds `{canvas, outer, fill, bar_w}`
+- `_bars: Dictionary` — keyed by boss `get_instance_id()`; each entry holds `{canvas, outer, fill, bar_w, particles, shaking}`
 
-**Boss health bar:** `CanvasLayer` (layer 25) with four stacked `ColorRect`s (colored outer frame, black inner frame, black background, colored fill). Bar width = viewport width minus `2 × BAR_MARGIN`. Tint color is passed in per update (bosses use `Main.modulate`). Canvas is parented to `Main`, not the boss node, so it survives Y-sort reparenting under `Walls`.
+**Boss health bar:** `CanvasLayer` (layer 25) with four stacked `ColorRect`s (colored outer frame, black inner frame, black background, colored fill) plus a `CPUParticles2D` at the fill tip. Bar width = viewport width minus `2 × BAR_MARGIN`. Tint color is passed in per update (bosses use `Main.modulate`). Canvas is parented to `Main`, not the boss node, so it survives Y-sort reparenting under `Walls`.
 
 **Key functions:**
 - `create_boss_health_bar(boss, main)` — registers a bar for `boss`; call deferred from boss `_ready()` after reparent
-- `update_boss_health_bar(boss, hp, max_hp, visible, tint)` — sets visibility and fill ratio
+- `update_boss_health_bar(boss, hp, max_hp, visible, tint)` — sets visibility, fill ratio, tints particles, and repositions particles to the fill tip
+- `shake_boss_health_bar(boss)` — debounced shake: tweens canvas offset ±2px horizontal + random ±2px vertical over ~0.14s, then bursts the tip particles; no-ops if already shaking
 - `remove_boss_health_bar(boss)` — frees canvas; call from boss `NOTIFICATION_PREDELETE`
 
 **Boss integration pattern:** `_ready()` → `call_deferred("_register_health_bar")` → `Utils.create_boss_health_bar(self, _main)`; `_process()` → `Utils.update_boss_health_bar(...)`; `_notification(PREDELETE)` → `Utils.remove_boss_health_bar(self)`.
+
+---
+
+### TimedObject.gd (Node2D)
+- Positioned at tile top-left; requires a `Sprite2D` child named `"Sprite2D"`
+- Tracks how long the player has been in the same room; uses `_was_in_room` edge detection to reset on each entry
+- After `APPEAR_TIME = 120.0s` (if `GameManager.has_ability("chain")` is false): shows sprite, starts blinking every `BLINK_INTERVAL = 0.5s`, sets `_main.player.speed_multiplier = 0.8`
+- On room exit or re-entry: calls `_hide()` — hides sprite, resets blink state and timer, restores `speed_multiplier = 1.0`
+- If chain ability is already granted when the timer would fire, the object stays hidden permanently
 
 ---
 
@@ -446,8 +458,10 @@ Sprites/
 **Purpose:** Map/teleport overlay opened by TAB. Slides in/out from the top of the screen (0.15s SINE tween). Mode is determined at open time based on player state.
 
 **Modes:**
-- **Teleport mode** — player is on an open TeleportPanel and at least one non-one-way destination exists (`Main.can_teleport_from_panel()`). Cursor navigates between destination rooms; WASD/Arrow keys snap cursor to nearest destination; Space teleports.
+- **Teleport mode** — player is on an open TeleportPanel and at least one non-one-way destination exists (`Main.can_teleport_from_panel()`). Cursor navigates between destination rooms; WASD/Arrow keys snap cursor to nearest destination; Space teleports (pressing Space on the player's current room does nothing).
 - **Map-only mode** — TAB pressed elsewhere (or no destinations). No cursor, no navigation. Instructions: "TAB: Close"
+
+**Title:** "The Map" is always drawn at the top of the overlay in both modes (replaces the per-panel name that was shown only in teleport mode).
 
 **Key variables:** `_teleport_mode: bool`, `_open_panel_rooms: Array` (destinations only), `_visited: Dictionary`, `_cursor: Vector2i`, `_slide_tween: Tween`, `_pulse_timer: float`, `_pulse_large: bool`, `_space_hint_done: bool`, `_wasd_hint_done: bool`, `_first_two_done: bool`, `_input_delay: float`, `_first_teleport_room: Vector2i`, `_first_teleport_room_set: bool`
 
@@ -526,6 +540,7 @@ Sprites/
 - `push(dir)` — displaces `position` by `dir * TILE_SIZE`; sprite lag produces the slide visual
 - `_die()` — hides sprite, fires particle burst (`one_shot=true`, `explosiveness=1.0` set in `_ready()`); enemy stays dead until `reset()` is called
 - `reset()` — restores position, visual pos, sprite visibility; called by `Main._reset_room()` and `Main._transition_to_room()`
+- `_eject_from_solid()` — BFS from current tile outward; teleports `position` (and snaps `_visual_pos`) to the nearest tile where the hitbox doesn't intersect any solid; no-ops if already clear
 
 **Reset triggers:** room restart (R / player contact), room entry (transition to the enemy's room).
 
@@ -632,6 +647,10 @@ Enemy.tscn:
 BossDoor.tscn:
   Node2D [BossDoor.gd]
   └── Sprite2D [locked_door1.png, centered=false]
+
+TimedObject.tscn:
+  Node2D [TimedObject.gd]
+  └── Sprite2D [arrow_up.png, centered=false]
 ```
 
 ---
@@ -656,6 +675,7 @@ All objects use `centered = false`.
 | AbilityGate | TAB.png | tile top-left |
 | Enemy / WaterEnemy / WaterBoss | Front_Idle1.png | tile top-left (moves continuously) |
 | BossDoor | locked_door1.png | tile top-left |
+| TimedObject | arrow_up.png | tile top-left |
 
 Floor: black `Color(0, 0, 0)` drawn in `Main._draw()`. Background: black.
 
@@ -747,4 +767,9 @@ Enemy enters beam:
 | Floor panel pulsing border highlight (chain tutorial) | FloorPanel.gd `set_highlight()` |
 | Ability intro sphere arcs (push → blocks, chain → panels) | AbilityTutorial.gd |
 | Boss health bar HUD (top of screen, room-tinted) | Utils.gd `create/update_boss_health_bar()`; WaterBoss.gd |
+| Boss health bar shake + particle burst on damage | Utils.gd `shake_boss_health_bar()`; WaterBoss.gd beam damage block |
 | Enemy particle burst on beam death | Enemy.gd `_die()`, CPUParticles2D one-shot burst |
+| Water enemies freeze while map overlay is open | WaterEnemy.gd `_process` |
+| Water enemies eject from solids | Enemy.gd `_eject_from_solid()`; WaterEnemy.gd `_process` |
+| TimedObject: slow + blink after 2min in room | TimedObject.gd; Player.gd `speed_multiplier` |
+| TAB label black outline above player | Main.gd `_ready()` outline_size=2 |

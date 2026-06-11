@@ -11,8 +11,7 @@ func create_boss_health_bar(boss: Node, main: Node) -> void:
 	var key := boss.get_instance_id()
 	if _bars.has(key):
 		return
-	var vp := main.get_viewport().get_visible_rect()
-	var bar_w := vp.size.x - BAR_MARGIN * 2.0
+	var bar_w = 800.0 - BAR_MARGIN * 2.0
 	var m := BAR_MARGIN
 	var h := BAR_H
 	var o := BAR_OUTLINE

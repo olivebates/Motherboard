@@ -10,6 +10,7 @@ const PUSH_FREEZE := 0.15
 @export var start_with_push: bool = false
 @export var start_with_chain: bool = false
 @export var save_system_enabled: bool = false
+@export var room_teleport_enabled: bool = false
 
 var movement_locked := false
 var visual_pos: Vector2
@@ -108,6 +109,45 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("place_prong"):
 		_main.spawn_prong(get_body_center())
+	if room_teleport_enabled and event is InputEventKey and event.pressed and not event.echo:
+		var shift = event.shift_pressed
+		if shift:
+			var dir := Vector2i.ZERO
+			if event.keycode == KEY_UP:
+				dir = Vector2i(0, -1)
+			elif event.keycode == KEY_DOWN:
+				dir = Vector2i(0, 1)
+			elif event.keycode == KEY_LEFT:
+				dir = Vector2i(-1, 0)
+			elif event.keycode == KEY_RIGHT:
+				dir = Vector2i(1, 0)
+			elif event.keycode == KEY_P:
+				GameManager.grant_ability("push")
+			elif event.keycode == KEY_O:
+				GameManager.grant_ability("chain")
+			if dir != Vector2i.ZERO:
+				_try_room_teleport(dir)
+
+func _try_room_teleport(dir: Vector2i) -> void:
+	var target_room = _main.current_room + dir
+	var anchor: Node = null
+	for node in get_tree().get_nodes_in_group("teleport_anchors"):
+		var room := Vector2i(
+			floori(node.global_position.x / (25 * TILE_SIZE)),
+			floori(node.global_position.y / (12 * TILE_SIZE))
+		)
+		if room == target_room:
+			anchor = node
+			break
+	if anchor == null:
+		return
+	position = _grid_to_world(Vector2i(
+		floori(anchor.global_position.x / TILE_SIZE),
+		floori(anchor.global_position.y / TILE_SIZE)
+	))
+	visual_pos = position + _body_offset
+	eject_from_solid()
+	_main.check_room_transition(grid_pos, position)
 
 func _hitbox_rect(pos: Vector2) -> Rect2:
 	var center := pos + _body_offset + _hitbox_offset

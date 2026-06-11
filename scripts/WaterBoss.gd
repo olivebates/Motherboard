@@ -43,6 +43,11 @@ func _ready() -> void:
 	call_deferred("_register_health_bar")
 
 func _register_health_bar() -> void:
+	if _main == null:
+		_main = get_tree().current_scene as Node2D
+	if _main == null:
+		call_deferred("_register_health_bar")
+		return
 	Utils.create_boss_health_bar(self, _main)
 
 # ── Hitbox ────────────────────────────────────────────────────────────────────
