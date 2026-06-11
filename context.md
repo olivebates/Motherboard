@@ -99,7 +99,7 @@ scripts/
   GameManager.gd           — Autoload singleton (puzzle state + ability tracking)
   Main.gd                  — Root scene controller; on room reset: boss_spawned_enemies in current room are queue_freed instead of reset; on room transition: boss_spawned_enemies in departing room are queue_freed; skips splash screen when SaveManager.skip_splash is true; TAB label above player has black outline (outline_size=2)
   Player.gd                — Player movement and input; exports start_with_push, start_with_chain, save_system_enabled; calls SaveManager.on_player_ready() at end of _ready(); var speed_multiplier: float = 1.0 scales movement (set by TimedObject)
-  SaveManager.gd           — Autoload singleton; save/load system; autosaves every 5s to active slot; 1–9 selects slot (loads if file exists); Shift+1–9 deletes that slot; save_system_enabled=false on Player auto-activates slot 1 and loads it on start; reloads scene on load (skip_splash=true); tracks key_doors_opened, boss_doors_opened, boss_defeated for permanently-freed nodes; status label (top-left, fades after 1.5s) for slot feedback; save files at user://save_slot_N.json
+  SaveManager.gd           — Autoload singleton; save/load system; autosaves every 5s to active slot; slot 1 selected by default; number-key input only active when Player.save_system_enabled=true: 1–9 selects+loads slot, Shift+1–9 deletes, Alt+1–9 selects without loading; save_system_enabled=false auto-activates slot 1 for autosave but never loads on start; reloads scene on load (skip_splash=true); tracks key_doors_opened, boss_doors_opened, boss_defeated for permanently-freed nodes; status label (top-left, fades after 1.5s) for slot feedback; save files at user://save_slot_N.json
   Prong.gd                 — Prong placement logic
   PushBlock.gd             — Push block with sprite-lag animation; pushes enemies on contact
   ElectricBeam.gd          — Animated electricity beam (white, no transparency)
@@ -485,20 +485,22 @@ Sprites/
 **Key constants:** `AUTOSAVE_INTERVAL = 5.0`, `SAVE_DIR = "user://"`
 
 **Key variables:**
-- `active_slot: int` — currently active save slot (1–9); `-1` = none
+- `active_slot: int` — currently active save slot (1–9); default `1`; `-1` = none (e.g. after deleting the active slot)
+- `_save_system_enabled: bool` — mirrors `Player.save_system_enabled`; set by `on_player_ready()`; gates number-key input handling
 - `skip_splash: bool` — set `true` before scene reload so `Main._ready()` skips the splash screen
 - `_pending_data: Dictionary` — save data waiting to be applied after the reloaded scene is ready
 - `_key_doors_opened / _boss_doors_opened / _boss_defeated` — accumulated state for permanently-freed nodes that can't be queried after death
 
-**Input:**
-- **1–9**: select slot; loads immediately if file exists, otherwise just activates the slot
+**Input (only active when `_save_system_enabled` is true):**
+- **1–9**: select slot and load immediately if file exists, otherwise just activates the slot
 - **Shift+1–9**: delete that slot's save file; deactivates slot if it was active
+- **Alt+1–9**: select slot without loading (even if a save file exists)
 
 **Save data (JSON at `user://save_slot_N.json`):** player world position, current room, abilities dict, push block/nut grid positions (keyed by `start_grid_pos`), collected keys (by `start_grid_pos`), opened KeyDoors, open TeleportPanels, removed BossDoors, boss defeated flag, enemy positions + dead flags, map visited rooms.
 
 **Load flow:** `load_slot()` → `GameManager.clear_scene_state()` + `reload_current_scene()` → `_process()` detects new scene is ready → `call_deferred("_apply_load", data)` → restores all state silently (no animations/shakes) → calls `Main._update_beam()`.
 
-**Auto-slot mode** (`Player.save_system_enabled = false`): `on_player_ready(false)` activates slot 1 and deferred-loads it if the file exists. Manual mode (`true`): user picks slot with 1–9.
+**Auto-slot mode** (`Player.save_system_enabled = false`): `on_player_ready(false)` activates slot 1 for autosaving but does not load any save file — game starts from the scene's default state. Number-key input is disabled. Manual mode (`Player.save_system_enabled = true`): slot 1 is pre-selected by default; user can switch/load/delete slots with number keys.
 
 **Notification hooks** (called by game objects before self-destruction):
 - `notify_key_door_opened(gp)` — called from `KeyDoor._open()`
