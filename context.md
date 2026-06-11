@@ -45,7 +45,7 @@ Godot Y-sorts by each node's `position.y` (higher Y = drawn in front). Walls use
 - At startup, gameplay nodes in `Y_SORT_GROUPS` are reparented under `Walls` (global transform preserved) so they sort in the same pass as wall tiles
 - New prongs are spawned as children of `wall_tilemap` directly
 
-**`Y_SORT_GROUPS`:** `players`, `prongs`, `doors`, `lightning_blockers`, `key_doors`, `push_blocks`, `pass_blocks`, `keys`, `teleport_panels`, `screws`, `enemies`
+**`Y_SORT_GROUPS`:** `players`, `prongs`, `doors`, `lightning_blockers`, `key_doors`, `push_blocks`, `pass_blocks`, `keys`, `teleport_panels`, `screws`, `enemies`, `breakable_walls`
 
 > **Rule:** Every new solid or interactive object added to the game must be added to `Y_SORT_GROUPS` (and `add_to_group` with a matching group name in its script) so it is reparented under `Walls` at startup and depth-sorts correctly against the player.
 
@@ -85,6 +85,7 @@ scenes/
   KeyDoor.tscn             — Solid door that opens when all Keys in the room are collected
   Key.tscn                 — Collectible that unlocks the KeyDoor in the same room
   PassBlock.tscn           — Passable block; player walks through, push blocks cannot enter
+  BreakableWall.tscn       — Solid block destroyed by the electric beam (requires "break" ability); wall_breakable.png sprite; shakes 0.4s then particle burst; resets on room reset
   AbilityPickup.tscn       — Ability unlock pickup (white circle); exports: ability, message
   AbilityGate.tscn         — Object hidden until a required ability is unlocked; TAB.png sprite
   TeleportPanel.tscn       — Interactive teleport panel; closed=solid, open=passable; exports: panel_name, one_way
@@ -93,41 +94,45 @@ scenes/
   WaterEnemy.tscn          — WaterEnemy variant; uses WaterEnemy.gd; freezes when not in current room or when map overlay is open; ejects from solids each frame; supports boss_spawned flag
   WaterBoss.tscn           — Boss enemy; uses WaterBoss.gd; 2000 HP at 2× scale; place at tile top-left in any room
   BossDoor.tscn            — Solid door that permanently disappears when the boss dies; uses locked_door1.png; in "boss_doors" group only (NOT push_blocks — has no push() method)
+  RoomSolvedTile.tscn      — Invisible floor tile; when stepped on for the first time marks the room as solved (snap SFX -14dB, 2px screen shake); solved rooms: doors permanently open, broken breakable walls stay broken; state saved per-room in SaveManager
   TimedObject.tscn         — Object that appears after 2 minutes in its room (chain upgrade not yet acquired); blinks every 0.5s while visible; slows player speed to 80% while visible; hides, restores speed, and resets timer on each room entry; always hidden once chain is acquired; uses arrow_up.png sprite
 
 scripts/
   GameManager.gd           — Autoload singleton (puzzle state + ability tracking)
-  Main.gd                  — Root scene controller; on room reset: boss_spawned_enemies in current room are queue_freed instead of reset; on room transition: boss_spawned_enemies in departing room are queue_freed; skips splash screen when SaveManager.skip_splash is true; TAB label above player has black outline (outline_size=2)
+  AudioManager.gd          — Autoload singleton; manages all SFX and background music; SFX keys: character_death, electric_fail, electric_noise (loops while beam active, -26.1dB), electric_spawn, plant_stake, water_death, snap (-14dB, plays on room solved tile trigger); music keys: "Orange"=Motherboard_Level_Loop, "Yellow"=Motherboard_Title_Loop; all music streams start at -80dB and play immediately; set_music(key) crossfades over 1s (EASE_IN sine fade-out, EASE_OUT sine fade-in, both starting at -30dB so overlap is audible); first set_music call fades in over 3s (MUSIC_START_FADE); start_beam_noise()/stop_beam_noise() control the looping beam SFX; set_music() captures old key in local var before tween to avoid stale closure bug
+  Main.gd                  — Root scene controller; on room reset: plays character_death SFX; on prong spawn: plays plant_stake SFX; on room transition: plays music for new room anchor's music key; on teleport: fades static in over 0.4s then teleports (plays electric_spawn) and instantly hides static; boss_spawned_enemies in current room are queue_freed instead of reset; skips splash screen when SaveManager.skip_splash is true; TAB label above player has black outline (outline_size=2); resets breakable_walls in current room on room reset
   Player.gd                — Player movement and input; exports start_with_push, start_with_chain, save_system_enabled; calls SaveManager.on_player_ready() at end of _ready(); var speed_multiplier: float = 1.0 scales movement (set by TimedObject)
-  SaveManager.gd           — Autoload singleton; save/load system; autosaves every 5s to active slot; slot 1 selected by default; number-key input only active when Player.save_system_enabled=true: 1–9 selects+loads slot, Shift+1–9 deletes, Alt+1–9 selects without loading; save_system_enabled=false auto-activates slot 1 for autosave but never loads on start; reloads scene on load (skip_splash=true); tracks key_doors_opened, boss_doors_opened, boss_defeated for permanently-freed nodes; status label (top-left, fades after 1.5s) for slot feedback; save files at user://save_slot_N.json
+  SaveManager.gd           — Autoload singleton; save/load system; autosaves every 5s to active slot; slot 1 selected by default; number-key input only active when Player.save_system_enabled=true: 1–9 selects+loads slot, Shift+1–9 deletes, Alt+1–9 selects without loading; save_system_enabled=false auto-activates slot 1 for autosave but never loads on start; reloads scene on load (skip_splash=true); tracks key_doors_opened, boss_doors_opened, boss_defeated, rooms_solved (Array of [rx,ry]), breakables_destroyed (Array of [gx,gy]) for permanently-freed/persistent nodes; notify_room_solved(room) also snapshots all currently-destroyed breakable walls in that room; is_room_solved()/is_breakable_destroyed() queried by Door and BreakableWall; on load: restores destroyed breakables silently and re-opens doors in solved rooms after beam sync; status label (top-left, fades after 1.5s) for slot feedback; save files at user://save_slot_N.json
   Prong.gd                 — Prong placement logic
   PushBlock.gd             — Push block with sprite-lag animation; pushes enemies on contact
-  ElectricBeam.gd          — Animated electricity beam (white, no transparency)
-  Door.gd                  — Door open/close logic
+  ElectricBeam.gd          — Animated electricity beam (white, no transparency); calls AudioManager.start_beam_noise() on activate and stop_beam_noise() on deactivate
+  Door.gd                  — Door open/close logic; set_open(false) is ignored when SaveManager.is_room_solved() for the door's room (permanently open in solved rooms)
   FloorPanel.gd            — Floor panel registration + circle-outline highlight + pulsing border highlight
-  LightningBlocker.gd      — Lightning blocker; alternates textures when active
+  LightningBlocker.gd      — Lightning blocker; alternates textures when active; plays electric_fail SFX when set_blocking(true)
   WallTileMap.gd           — TileMapLayer script for painting walls in-editor
-  ResetEffect.gd           — CRT static CanvasLayer effect for room reset
+  ResetEffect.gd           — CRT static CanvasLayer effect for room reset; play_teleport_buildup() fades in over 0.4s and stays; cancel() instantly hides
   KeyDoor.gd               — Solid door; counts Keys in same room, opens with shrink-to-center animation; opens immediately on _count_keys() if room has zero keys; _open() calls SaveManager.notify_key_door_opened() before removing self from group
   Key.gd                   — Collectible; shrinks to center on pickup, notifies KeyDoor
   Nut.gd                   — Pushable conductor; beam routes through it when chain ability active; pushes enemies on contact
   Screw.gd                 — Static conductor; beam routes through it when chain ability active; cannot be pushed
   PassBlock.gd             — Passthrough block; solid to push blocks, transparent to player
+  BreakableWall.gd         — Solid block in "breakable_walls" group; requires "break" ability to be destroyed by beam; shakes 0.4s then hides + spawns particle burst; reset() restores it unless SaveManager.is_breakable_destroyed() (permanently destroyed when room is solved); destroyed walls removed from _is_static_solid so player can walk through; first beam contact frees all nodes in "break_highlight" group
   SplashScreen.gd          — Launch splash; black bg + credit text, dismissed by any key
   YSortHitboxBottom.gd     — Hitbox-bottom Y-sort helpers (Player, Prong)
   MapOverlay.gd            — Map overlay UI (TAB to open); slides in/out from top; teleport mode requires push ability; title always shows "The Map" in both modes; pressing Space on the player's current room does nothing
-  TeleportAnchor.gd        — Room teleport anchor markers (legacy fallback; TeleportPanel is now the primary teleport mechanic)
+  TeleportAnchor.gd        — Room teleport anchor markers (legacy fallback; TeleportPanel is now the primary teleport mechanic); @export var color: Color; @export var music: String = "" — "Orange" fades in Motherboard_Level_Loop, "Yellow" fades in Motherboard_Title_Loop on room entry
   TeleportPanel.gd         — Interactive teleport panel; closed=solid (player pushes 0.2s to open); open=passable floor; screenshake on open; exports panel_name (shown on map) and one_way (excludes from destinations)
   OnewayPanel.gd           — (uses TeleportPanel.gd) TeleportPanel with one_way=true; source-only teleporter
-  AbilityPickup.gd         — Pickup that grants an ability and triggers the ability intro via AbilityTutorial
+  AbilityPickup.gd         — Pickup that grants an ability and triggers the ability intro via AbilityTutorial; clears all prongs (with shrink animation) and deactivates beam before playing intro
   AbilityMessage.gd        — CanvasLayer message overlay (layer 25); prompt appears after 2s
   AbilityGate.gd           — Node2D that hides its sprite until required_ability is granted
-  AbilityTutorial.gd       — Autoload singleton; plays per-ability intro animations (sphere arcs, block/panel highlights)
+  AbilityTutorial.gd       — Autoload singleton; plays per-ability intro animations (sphere arcs, block/panel highlights); inner class BoundingHighlight (group "break_highlight") draws a single pulsing rect around all breakable walls; inner class SphereOverlay draws arcing spheres
   Utils.gd                 — Autoload singleton; shared helpers (reusable boss health bar HUD); remove_boss_health_bar uses untyped canvas var + erases dict entry before queue_free to avoid freed-instance crash on scene reload; shake_boss_health_bar() tweens canvas offset ±2px horizontally + random ±2px vertically (debounced); CPUParticles2D at fill tip bursts top-right on each shake
   Enemy.gd                 — Enemy; walks toward player, blocked by walls/solids, killed by beam, resets player on contact; _eject_from_solid() BFS-finds nearest free tile when inside a solid
-  WaterEnemy.gd            — Extends Enemy.gd; freezes movement when not in current room or when map overlay is open; calls _eject_from_solid() each frame; boss_spawned flag auto-adds to "boss_spawned_enemies" group (deleted on room exit/reset instead of reset)
+  WaterEnemy.gd            — Extends Enemy.gd; freezes movement when not in current room or when map overlay is open; calls _eject_from_solid() each frame; boss_spawned flag auto-adds to "boss_spawned_enemies" group (deleted on room exit/reset instead of reset); overrides _die() to play water_death SFX
   WaterBoss.gd             — Extends WaterEnemy.gd; 2× scale, 2000 HP; @export var debug_low_hp: bool sets HP to 10 at start if true; boss health bar via Utils (visible in boss home room when alive); takes 1 dmg/frame from beam (shake 1.0 + health bar shake+particles) + freeze-frame on first contact each exposure; teleports to random free tile (≥5 tiles from player, ≥2 tiles from room border) after 1.5s in beam; sprite slides to new position on teleport; speed scales with HP loss (BASE=40→MAX=100); spawns two WaterEnemy minions 3 tiles out below 80% HP with 0.7s scale-pulse telegraph (interval scales 4s→2s as HP drops, skips spawn if within 96px of player); charge attack: cooldown 3s, triggers when player within 5 tiles — 1s squash/stretch wind-up, then lunges at 240 px/s decelerating to normal speed; teleport mid-windup resets cooldown; phase 2 at 50% HP: screen shake + brief pause; death: series of 3 extreme shakes (0.5s apart), minion water_enemies in room deleted immediately (boss skips self in that loop), boss freezes 1s then arcs off screen in a parabola at z_index=100 with a slight rotation (dir * p * 0.8 rad) — doors open and particles fire once boss exits room bounds; sprite lag at half enemy speed (BOSS_SPRITE_SPEED=10); no modulation effects
   BossDoor.gd              — Solid tile object in "boss_doors" group only (NOT push_blocks — has no push() method); provides grid_pos/start_grid_pos computed from position; open() calls SaveManager.notify_boss_door_opened() then queue_free(); reset() also frees if already opened (permanent removal)
+  RoomSolvedTile.gd        — Invisible floor tile (z_index=-10, group "room_solved_tiles"); positioned at tile top-left; triggers once when player body center grid pos matches tile; calls SaveManager.notify_room_solved(), plays snap SFX, emits shake_requested(2.0); auto-triggers on _ready() if room already solved (loaded from save)
   TimedObject.gd           — Node2D that tracks per-room-visit time; sprite (arrow_up.png) appears after 120s if player lacks chain ability; blinks every 0.5s while visible; sets player.speed_multiplier=0.8 while showing; resets (hides, restores speed, clears timer) each time the player enters its room; always hidden after chain ability granted; requires Sprite2D child named "Sprite2D"
 
 Sprites/
@@ -144,6 +149,7 @@ Sprites/
   key_file3.png            — Key sprite
   electric_front.png       — ElectricBeam sprite (unused; beam drawn procedurally)
   wall1.png                — Wall tile sprite
+  wall_breakable.png       — BreakableWall sprite
   TAB.png                  — AbilityGate sprite
   teleport_closed.gif      — TeleportPanel closed/solid sprite
   teleport_open.png        — TeleportPanel open/passable sprite
@@ -191,6 +197,7 @@ Sprites/
 
 **Key variables:**
 - `@onready var wall_tilemap: TileMapLayer` — assign in inspector; checked by `_is_static_solid()` / `get_player_blocking_rects()`
+- `@export var pass_tilemap: TileMapLayer` — assign in inspector; tiles block push blocks (`can_push_block_to`) but are passable to the player
 - `current_room: Vector2i`
 - `room_entry_positions: Dictionary`
 - `_shake_amount: float` — camera shake magnitude
@@ -202,7 +209,7 @@ Sprites/
 - `_trigger_shake(strength)` — sets `_shake_amount`; connected to `GameManager.shake_requested`
 - `_update_beam()` — checks blockers, sets `GameManager.beam_blocked`, calls `evaluate_puzzle()`, activates/deactivates beam
 - `spawn_prong(pixel_pos)` — `pixel_pos` is hitbox center; if 2 prongs already exist, oldest is removed with shrink animation before placing new one (no "clear both" behaviour)
-- `_reset_room()` — locks player → ResetEffect fades in → awaits `peaked` → resets room state (prongs, push blocks, key doors, keys, enemies) → awaits `done` → unlocks player
+- `_reset_room()` — locks player → ResetEffect fades in → awaits `peaked` → resets room state (prongs, push blocks, breakable walls, key doors, keys, enemies) → awaits `done` → unlocks player
 - `_transition_to_room(new_room)` — clears prongs instantly, resets enemies in new room, tweens camera 0.25s
 - `check_room_transition(player_grid, player_pixel)` — uses `floori` division; downward and rightward transitions require player pixel position to be 24px past the boundary before firing
 - `tile_rect(grid_pos)` → `Rect2` — 32×32 world rect for a grid tile
@@ -211,7 +218,7 @@ Sprites/
 - `can_teleport_from_panel()` → `bool` — true if player is on an open panel, at least 2 total open panels exist (including one-ways), and at least one non-one-way destination exists; used for TAB prompt and teleport mode activation
 - `get_open_teleport_panel_rooms()` — returns rooms with open non-one-way TeleportPanels (destinations only)
 - `get_player_blocking_rects(area)` → `Array[Rect2]` — static tile rects + push-block rects overlapping `area`; used by player and enemy AABB movement
-- `can_push_block_to(grid_pos)` — false if static solid, push block, or pass block occupies tile
+- `can_push_block_to(grid_pos)` — false if static solid, push block, pass block, or pass_tilemap tile occupies tile
 - `get_push_block_at_face(player_rect, dir, from_point)` → `Node` — among push blocks flush against `player_rect` on the given face, returns the one whose center is closest to `from_point`
 - `has_pass_block_at(grid_pos)` — checks pass_blocks group
 - `get_push_block_at(grid_pos)` → Node or null
@@ -290,6 +297,19 @@ Sprites/
 - Added to group `"pass_blocks"`; uses `switch_open2.png` sprite
 - `get_grid_pos()` — used by `Main.has_pass_block_at()`
 - NOT included in `Main.is_blocked()` — player passes through freely
+
+---
+
+### BreakableWall.gd (Node2D)
+**Purpose:** Solid block destroyed by the electric beam once the `"break"` ability is acquired.
+
+- Added to group `"breakable_walls"`; in `Y_SORT_GROUPS`; `y_sort_origin=1` so it sorts in front of same-tile Keys
+- Position at tile top-left; `get_grid_pos()`, `get_center()`
+- Solid to player and push blocks via `Main._is_static_solid()` — skipped when `_destroyed=true` so the gap is walkable after breaking
+- `_process()` checks `GameManager.has_ability("break")`; if beam is active and `ElectricBeam.is_point_on_beam(get_center(), BEAM_RADIUS)` returns true, triggers shake and frees all `"break_highlight"` nodes
+- Shake: sprite offset oscillates for `SHAKE_DURATION=0.4s` with decaying `SHAKE_MAGNITUDE=2.5`
+- `_explode()` — spawns 24-particle `CPUParticles2D` burst, hides sprite, sets `_destroyed=true`, calls `Main._update_beam()`; does NOT `queue_free` (reset restores it)
+- `reset()` — restores sprite visibility, clears all state; called by `Main._reset_room()`
 
 ---
 
@@ -392,12 +412,15 @@ Sprites/
 
 **Key constants:** `ARC_HEIGHT=48`, `SPHERE_DURATION=1.2`, `SPHERE_RADIUS=4`
 
-**Inner class `SphereOverlay` (Node2D):** Temporary node added to the main scene during the push intro. Holds `_spheres: Array` of `{pos: Vector2, done: bool}` entries; draws undone spheres as white circles in `_draw()` via `to_local()`. Freed automatically when all spheres arrive.
+**Inner class `SphereOverlay` (Node2D):** Temporary node added to the main scene during intro animations. Holds `_spheres: Array` of `{pos: Vector2, done: bool}` entries; draws undone spheres as white circles in `_draw()` via `to_local()`. Freed automatically when all spheres arrive.
+
+**Inner class `BoundingHighlight` (Node2D):** Temporary node in group `"break_highlight"`; `z_index=5`. Holds a `world_rect: Rect2` covering all breakable walls in the room. Draws a single pulsing white rect outline (padding oscillates ±1px around `BASE_PADDING=4`). Persists until the player triggers the first breakable wall, which frees all `"break_highlight"` nodes.
 
 **Key functions:**
 - `play_intro(ability, player, main)` — dispatches to the correct intro by ability name; for unknown abilities falls back to `AbilityMessage` overlay
 - `_play_push_intro(player, main)` — freezes player; finds all PushBlocks (with `has_method("set_highlight")` guard to exclude Nuts) in the current room; spawns a `SphereOverlay`; tweens one sphere per block along a parabolic arc (`sin(t*PI)*ARC_HEIGHT`); on each arrival calls `block.set_highlight(true)`; unlocks player and frees overlay when the last sphere lands
 - `_play_chain_intro(player, main)` — same arc animation targeting FloorPanel nodes (group `"floor_panels"`) with `id == "chain1"` in the current room; on arrival calls `panel.set_highlight(true)`; unlocks player when last sphere lands
+- `_play_break_intro(player, main)` — same arc animation targeting all BreakableWall nodes in the current room; when the last sphere lands, computes the bounding rect of all walls (min/max positions + 32px tile size), spawns a `BoundingHighlight`, then unlocks player
 
 ---
 
@@ -646,6 +669,10 @@ Enemy.tscn:
   ├── Sprite2D [Front_Idle1.png, centered=false]
   └── Particles [CPUParticles2D — one_shot, explosiveness=1.0, white arc burst on death]
 
+BreakableWall.tscn:
+  Node2D [BreakableWall.gd, y_sort_origin=1]  ← position at tile top-left
+  └── Sprite2D [wall_breakable.png, centered=false]
+
 BossDoor.tscn:
   Node2D [BossDoor.gd]
   └── Sprite2D [locked_door1.png, centered=false]
@@ -653,6 +680,10 @@ BossDoor.tscn:
 TimedObject.tscn:
   Node2D [TimedObject.gd]
   └── Sprite2D [arrow_up.png, centered=false]
+
+RoomSolvedTile.tscn:
+  Node2D [RoomSolvedTile.gd, z_index=-10]  ← position at tile top-left; no visible sprite
+  └── Sprite2D [visible=false — no visual]
 ```
 
 ---
@@ -673,6 +704,7 @@ All objects use `centered = false`.
 | KeyDoor | (door sprite) | tile top-left |
 | Key | key_file3.png | tile top-left |
 | PassBlock | switch_open2.png | tile top-left |
+| BreakableWall | wall_breakable.png | tile top-left |
 | AbilityPickup | (drawn via _draw) | tile top-left |
 | AbilityGate | TAB.png | tile top-left |
 | Enemy / WaterEnemy / WaterBoss | Front_Idle1.png | tile top-left (moves continuously) |
@@ -767,7 +799,9 @@ Enemy enters beam:
 | Splash screen on launch | SplashScreen.gd |
 | Map overlay slides in/out from top (0.15s SINE) | MapOverlay.gd `_open_map()` / `_close_map()` |
 | Floor panel pulsing border highlight (chain tutorial) | FloorPanel.gd `set_highlight()` |
-| Ability intro sphere arcs (push → blocks, chain → panels) | AbilityTutorial.gd |
+| Ability intro sphere arcs (push → blocks, chain → panels, break → breakable walls) | AbilityTutorial.gd |
+| Break ability: bounding highlight rect around all breakable walls until first break | AbilityTutorial.gd `BoundingHighlight`, BreakableWall.gd |
+| Breakable wall shake + particle burst on beam contact | BreakableWall.gd `_explode()` |
 | Boss health bar HUD (top of screen, room-tinted) | Utils.gd `create/update_boss_health_bar()`; WaterBoss.gd |
 | Boss health bar shake + particle burst on damage | Utils.gd `shake_boss_health_bar()`; WaterBoss.gd beam damage block |
 | Enemy particle burst on beam death | Enemy.gd `_die()`, CPUParticles2D one-shot burst |

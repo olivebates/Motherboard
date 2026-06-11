@@ -86,6 +86,26 @@ func play() -> void:
 	_tween.tween_method(func(v: float): _mat.set_shader_parameter("progress", v), 1.0, 0.0, FADE_OUT)
 	_tween.tween_callback(func(): _rect.visible = false; _active = false; done.emit())
 
+func play_teleport_buildup() -> void:
+	_active = true
+	_time = randf() * 100.0
+	_mat.set_shader_parameter("progress", 0.0)
+	_mat.set_shader_parameter("noise_time", _time)
+	_mat.set_shader_parameter("noise_seed", randf() * 1000.0)
+	_mat.set_shader_parameter("tint_color", Vector3(color.r, color.g, color.b))
+	_rect.visible = true
+	if _tween:
+		_tween.kill()
+	_tween = create_tween()
+	_tween.tween_method(func(v: float): _mat.set_shader_parameter("progress", v), 0.0, 1.0, 0.4)
+
+func cancel() -> void:
+	if _tween:
+		_tween.kill()
+		_tween = null
+	_rect.visible = false
+	_active = false
+
 func _process(delta: float) -> void:
 	if not _active:
 		return

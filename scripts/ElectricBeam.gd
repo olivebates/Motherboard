@@ -32,6 +32,7 @@ func activate(points: Array) -> void:
 	waypoints = points
 	active = true
 	visible = true
+	AudioManager.start_beam_noise()
 
 func deactivate() -> void:
 	active = false
@@ -39,6 +40,7 @@ func deactivate() -> void:
 	waypoints = []
 	line_main.clear_points()
 	line_glow.clear_points()
+	AudioManager.stop_beam_noise()
 
 func _process(delta: float) -> void:
 	if not active:

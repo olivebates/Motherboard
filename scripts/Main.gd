@@ -10,6 +10,7 @@ const CAMERA_TWEEN_DURATION := 0.25
 const CAMERA_MARGIN := Vector2(16.0, 16.0)
 
 @onready var wall_tilemap: TileMapLayer = $Walls
+@export var pass_tilemap: TileMapLayer
 
 var current_room := Vector2i(0, 0)
 var room_entry_positions: Dictionary = {}
@@ -48,6 +49,7 @@ const Y_SORT_GROUPS := [
 	"teleport_panels",
 	"screws",
 	"enemies",
+	"breakable_walls",
 ]
 
 func _ready() -> void:
@@ -82,6 +84,8 @@ func _ready() -> void:
 		modulate = start_anchor.color
 		reset_effect.color = modulate
 		room_entry_positions[current_room] = Vector2i(floori(start_anchor.position.x / TILE_SIZE), floori(start_anchor.position.y / TILE_SIZE))
+		if start_anchor.music != "":
+			AudioManager.set_music(start_anchor.music)
 	if not SaveManager.skip_splash:
 		var splash := SplashScreenScene.new()
 		add_child(splash)
@@ -132,6 +136,7 @@ func _reset_room() -> void:
 		return
 	_resetting = true
 	player.lock_movement()
+	AudioManager.play_sfx("character_death")
 	reset_effect.play()
 	await reset_effect.peaked
 	var rx0 := current_room.x * ROOM_WIDTH
@@ -146,6 +151,10 @@ func _reset_room() -> void:
 		var sgp: Vector2i = block.start_grid_pos
 		if sgp.x >= rx0 and sgp.x < rx0 + ROOM_WIDTH and sgp.y >= ry0 and sgp.y < ry0 + ROOM_HEIGHT:
 			block.reset()
+	for wall in get_tree().get_nodes_in_group("breakable_walls"):
+		var wgp: Vector2i = wall.get_grid_pos()
+		if wgp.x >= rx0 and wgp.x < rx0 + ROOM_WIDTH and wgp.y >= ry0 and wgp.y < ry0 + ROOM_HEIGHT:
+			wall.reset()
 	for door in get_tree().get_nodes_in_group("key_doors"):
 		var dgp: Vector2i = door.get_grid_pos()
 		if dgp.x >= rx0 and dgp.x < rx0 + ROOM_WIDTH and dgp.y >= ry0 and dgp.y < ry0 + ROOM_HEIGHT:
@@ -194,6 +203,9 @@ func _is_static_solid(grid_pos: Vector2i) -> bool:
 	for screw in get_tree().get_nodes_in_group("screws"):
 		if screw.get_grid_pos() == grid_pos:
 			return true
+	for wall in get_tree().get_nodes_in_group("breakable_walls"):
+		if not wall._destroyed and wall.get_grid_pos() == grid_pos:
+			return true
 	return false
 
 func is_blocked(grid_pos: Vector2i) -> bool:
@@ -227,6 +239,8 @@ func can_push_block_to(grid_pos: Vector2i) -> bool:
 	if get_push_block_at(grid_pos) != null:
 		return false
 	if has_pass_block_at(grid_pos):
+		return false
+	if pass_tilemap != null and pass_tilemap.get_cell_source_id(grid_pos) != -1:
 		return false
 	return true
 
@@ -325,6 +339,8 @@ func _transition_to_room(new_room: Vector2i) -> void:
 		_color_tween = create_tween()
 		_color_tween.tween_property(self, "modulate", anchor.color, CAMERA_TWEEN_DURATION)
 		reset_effect.color = anchor.color
+	if anchor != null and anchor.music != "":
+		AudioManager.set_music(anchor.music)
 
 	player.lock_movement()
 	if _cam_tween:
@@ -390,25 +406,36 @@ func _get_open_panel_for_room(room: Vector2i) -> Node:
 	return null
 
 func _on_teleport_requested(room: Vector2i) -> void:
+	reset_effect.play_teleport_buildup()
+	# Defer so _close_map()'s player.unlock_movement() fires before we re-lock
+	call_deferred("_complete_teleport", room)
+
+func _complete_teleport(room: Vector2i) -> void:
+	player.lock_movement()
+	await get_tree().create_timer(0.4).timeout
+	AudioManager.play_sfx("electric_spawn")
+
 	var panel := _get_open_panel_for_room(room)
+	var dest_gp: Vector2i
 	if panel != null:
-		var gp: Vector2i = panel.get_grid_pos()
-		if is_blocked(gp):
-			gp = _find_nearest_open_tile(gp)
-		player.reset_to(gp)
-		_transition_to_room(room)
-		room_entry_positions[room] = gp
-		return
-	var anchor := _get_anchor_for_room(room)
-	if anchor == null:
-		push_error("No teleport destination in room %s" % str(room))
-		return
-	var spawn_grid := Vector2i(floori(anchor.position.x / TILE_SIZE), floori(anchor.position.y / TILE_SIZE))
-	if is_blocked(spawn_grid):
-		spawn_grid = _find_nearest_open_tile(spawn_grid)
-	player.reset_to(spawn_grid)
+		dest_gp = panel.get_grid_pos()
+		if is_blocked(dest_gp):
+			dest_gp = _find_nearest_open_tile(dest_gp)
+	else:
+		var anchor := _get_anchor_for_room(room)
+		if anchor == null:
+			push_error("No teleport destination in room %s" % str(room))
+			player.unlock_movement()
+			reset_effect.cancel()
+			return
+		dest_gp = Vector2i(floori(anchor.position.x / TILE_SIZE), floori(anchor.position.y / TILE_SIZE))
+		if is_blocked(dest_gp):
+			dest_gp = _find_nearest_open_tile(dest_gp)
+
+	player.reset_to(dest_gp)
+	reset_effect.cancel()
 	_transition_to_room(room)
-	room_entry_positions[room] = spawn_grid
+	room_entry_positions[room] = dest_gp
 
 func _find_nearest_open_tile(start: Vector2i) -> Vector2i:
 	var visited := { start: true }
@@ -431,6 +458,7 @@ func _room_center(room: Vector2i) -> Vector2:
 	) + CAMERA_MARGIN
 
 func spawn_prong(pixel_pos: Vector2) -> void:
+	AudioManager.play_sfx("plant_stake")
 	if GameManager.prongs.size() >= 2:
 		var oldest = GameManager.prongs[0]
 		GameManager.remove_prong(oldest["node"])

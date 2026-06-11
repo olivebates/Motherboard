@@ -13,6 +13,8 @@ var _save_system_enabled: bool = false
 var _key_doors_opened: Array = []   # Array of [gx, gy]
 var _boss_doors_opened: Array = []  # Array of [gx, gy]
 var _boss_defeated: bool = false
+var _rooms_solved: Array = []       # Array of [rx, ry]
+var _breakables_destroyed: Array = [] # Array of [gx, gy]
 
 # Status HUD
 var _status_canvas: CanvasLayer = null
@@ -31,6 +33,31 @@ func notify_boss_door_opened(gp: Vector2i) -> void:
 
 func notify_boss_defeated() -> void:
 	_boss_defeated = true
+
+func notify_room_solved(room: Vector2i) -> void:
+	var entry = [room.x, room.y]
+	if not _rooms_solved.has(entry):
+		_rooms_solved.append(entry)
+		# Persist all currently-destroyed breakable walls in this room
+		var rx0 = room.x * 25
+		var ry0 = room.y * 12
+		for wall in get_tree().get_nodes_in_group("breakable_walls"):
+			if not wall._destroyed:
+				continue
+			var gp: Vector2i = wall.get_grid_pos()
+			if gp.x >= rx0 and gp.x < rx0 + 25 and gp.y >= ry0 and gp.y < ry0 + 12:
+				notify_breakable_destroyed(gp)
+
+func notify_breakable_destroyed(gp: Vector2i) -> void:
+	var entry = [gp.x, gp.y]
+	if not _breakables_destroyed.has(entry):
+		_breakables_destroyed.append(entry)
+
+func is_room_solved(room: Vector2i) -> bool:
+	return _rooms_solved.has([room.x, room.y])
+
+func is_breakable_destroyed(gp: Vector2i) -> bool:
+	return _breakables_destroyed.has([gp.x, gp.y])
 
 func _process(delta: float) -> void:
 	if not _pending_data.is_empty():
@@ -142,6 +169,8 @@ func save(slot: int) -> void:
 	data["key_doors_opened"] = _key_doors_opened.duplicate()
 	data["boss_doors_opened"] = _boss_doors_opened.duplicate()
 	data["boss_defeated"] = _boss_defeated
+	data["rooms_solved"] = _rooms_solved.duplicate()
+	data["breakables_destroyed"] = _breakables_destroyed.duplicate()
 
 	var panels_open := []
 	for panel in get_tree().get_nodes_in_group("teleport_panels"):
@@ -187,6 +216,8 @@ func load_slot(slot: int) -> void:
 	_key_doors_opened = []
 	_boss_doors_opened = []
 	_boss_defeated = false
+	_rooms_solved = []
+	_breakables_destroyed = []
 	_pending_data = result
 	skip_splash = true
 	GameManager.clear_scene_state()
@@ -202,6 +233,8 @@ func _apply_load(data: Dictionary) -> void:
 	_key_doors_opened = data.get("key_doors_opened", [])
 	_boss_doors_opened = data.get("boss_doors_opened", [])
 	_boss_defeated = data.get("boss_defeated", false)
+	_rooms_solved = data.get("rooms_solved", [])
+	_breakables_destroyed = data.get("breakables_destroyed", [])
 
 	# Room + camera
 	var room_arr = data.get("current_room", [0, 0])
@@ -251,6 +284,18 @@ func _apply_load(data: Dictionary) -> void:
 			key._collected = true
 			key.sprite.visible = false
 			key.sprite.scale = Vector2.ONE
+
+	# Breakable walls permanently destroyed
+	for wall in get_tree().get_nodes_in_group("breakable_walls"):
+		if is_breakable_destroyed(wall.get_grid_pos()):
+			wall._destroyed = true
+			wall.sprite.visible = false
+
+	# Room solved tiles — mark as triggered
+	for tile in get_tree().get_nodes_in_group("room_solved_tiles"):
+		if is_room_solved(tile._get_room()):
+			tile._triggered = true
+			tile.queue_redraw()
 
 	# KeyDoors opened — set state silently (no animation/shake)
 	for door in get_tree().get_nodes_in_group("key_doors"):
@@ -312,6 +357,14 @@ func _apply_load(data: Dictionary) -> void:
 
 	# Sync beam state
 	main._update_beam()
+
+	# Re-open doors in solved rooms (beam state may have closed them)
+	for door in get_tree().get_nodes_in_group("doors"):
+		var gp: Vector2i = door.get_grid_pos()
+		var room = Vector2i(floori(float(gp.x) / 25.0), floori(float(gp.y) / 12.0))
+		if is_room_solved(room) and not door.is_open:
+			door.sprite.visible = false
+			door.is_open = true
 
 	_show_status("Slot %d loaded" % active_slot)
 

@@ -25,6 +25,7 @@ func set_blocking(blocking: bool) -> void:
 	_is_blocking = blocking
 	if blocking:
 		_time = 0.0
+		AudioManager.play_sfx("electric_fail")
 	queue_redraw()
 
 func _process(delta: float) -> void:

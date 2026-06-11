@@ -11,6 +11,7 @@ func _ready() -> void:
 	add_to_group("keys")
 	_original_position = position
 	start_grid_pos = Vector2i(int(position.x) / 32, int(position.y) / 32)
+	z_index = -5
 
 func _process(_delta: float) -> void:
 	if _collected:

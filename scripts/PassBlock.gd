@@ -2,6 +2,7 @@ extends Node2D
 
 func _ready() -> void:
 	add_to_group("pass_blocks")
+	$Sprite2D.visible = false
 	$Sprite2D.centered = false
 	$Sprite2D.texture = load("res://Sprites/switch_open2.png")
 

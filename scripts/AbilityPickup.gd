@@ -38,6 +38,9 @@ func _collect(player: Node2D) -> void:
 
 	var main: Node2D = get_tree().current_scene
 	main.room_entry_positions[main.current_room] = player.grid_pos
+	for p in GameManager.clear_prongs():
+		p["node"].queue_free()
+	main._update_beam()
 	player.lock_movement()
 	AbilityTutorial.play_intro(ability, player, main)
 

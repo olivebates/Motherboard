@@ -17,6 +17,10 @@ func _get_home_room() -> Vector2i:
 func _in_current_room() -> bool:
 	return _get_home_room() == _main.current_room
 
+func _die() -> void:
+	super._die()
+	AudioManager.play_sfx("water_death")
+
 func _process(delta: float) -> void:
 	if not _in_current_room():
 		return

@@ -24,7 +24,13 @@ func _on_doors_update(door_id: String, open: bool) -> void:
 	if door_id == id:
 		set_open(open)
 
+func _get_room() -> Vector2i:
+	var gp = get_grid_pos()
+	return Vector2i(floori(float(gp.x) / 25.0), floori(float(gp.y) / 12.0))
+
 func set_open(open: bool) -> void:
+	if not open and SaveManager.is_room_solved(_get_room()):
+		return
 	if is_open == open:
 		return
 	is_open = open
