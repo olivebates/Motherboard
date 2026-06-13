@@ -5,6 +5,7 @@ extends Node2D
 const ANIM_DURATION := 0.15
 
 var is_open := false
+var _opening := false
 var _door_tween: Tween = null
 
 @onready var sprite: Sprite2D = $Sprite2D
@@ -31,26 +32,39 @@ func _get_room() -> Vector2i:
 func set_open(open: bool) -> void:
 	if not open and SaveManager.is_room_solved(_get_room()):
 		return
-	if is_open == open:
-		return
-	is_open = open
-	if _door_tween:
-		_door_tween.kill()
-
 	if open:
-		GameManager.shake_requested.emit(5.0)
-		sprite.visible = true
-		sprite.modulate = Color.WHITE
-		_apply_shrink_scale(1.0)
-		_door_tween = create_tween()
-		_door_tween.tween_method(_apply_shrink_scale, 1.0, 0.0, ANIM_DURATION)
-		_door_tween.tween_callback(_on_open_finished)
+		if is_open or _opening:
+			return
+		_opening = true
+		var main = get_tree().current_scene
+		main.shoot_door_ball(main.player.get_body_center(), position + Vector2(16.0, 16.0), _do_open)
 	else:
+		_opening = false
+		if not is_open:
+			return
+		is_open = false
+		if _door_tween:
+			_door_tween.kill()
 		sprite.modulate = Color.WHITE
 		sprite.visible = true
 		_apply_shrink_scale(0.0)
 		_door_tween = create_tween()
 		_door_tween.tween_method(_apply_shrink_scale, 0.0, 1.0, ANIM_DURATION)
+
+func _do_open() -> void:
+	if not _opening:
+		return
+	_opening = false
+	is_open = true
+	if _door_tween:
+		_door_tween.kill()
+	GameManager.shake_requested.emit(5.0)
+	sprite.visible = true
+	sprite.modulate = Color.WHITE
+	_apply_shrink_scale(1.0)
+	_door_tween = create_tween()
+	_door_tween.tween_method(_apply_shrink_scale, 1.0, 0.0, ANIM_DURATION)
+	_door_tween.tween_callback(_on_open_finished)
 
 func _on_open_finished() -> void:
 	sprite.visible = false

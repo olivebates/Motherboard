@@ -5,6 +5,7 @@ const ANIM_DURATION := 0.15
 var _keys_total := 0
 var _keys_collected := 0
 var _opened := false
+var _opening := false
 var _tween: Tween = null
 
 @onready var sprite: Sprite2D = $Sprite2D
@@ -36,6 +37,16 @@ func key_collected() -> void:
 		_open()
 
 func _open() -> void:
+	if _opened or _opening:
+		return
+	_opening = true
+	var main = get_tree().current_scene
+	main.shoot_door_ball(main.player.get_body_center(), position + Vector2(16.0, 16.0), _do_open)
+
+func _do_open() -> void:
+	if not _opening:
+		return
+	_opening = false
 	_opened = true
 	SaveManager.notify_key_door_opened(get_grid_pos())
 	remove_from_group("key_doors")
@@ -60,6 +71,7 @@ func _apply_shrink_scale(s: float) -> void:
 func reset() -> void:
 	if _opened:
 		return
+	_opening = false
 	_keys_collected = 0
 	if _tween:
 		_tween.kill()

@@ -31,6 +31,7 @@ var _tab_canvas: CanvasLayer
 var _tab_label: Label
 
 const ProngScene = preload("res://scenes/Prong.tscn")
+const DoorBallScene = preload("res://scripts/DoorBall.gd")
 
 const ResetEffectScene = preload("res://scripts/ResetEffect.gd")
 const SplashScreenScene = preload("res://scripts/SplashScreen.gd")
@@ -90,6 +91,96 @@ func _ready() -> void:
 		var splash := SplashScreenScene.new()
 		add_child(splash)
 		player.lock_movement()
+	_setup_mute_buttons()
+
+
+var _music_btn: Button
+var _sfx_btn: Button
+var _btn_border_styles: Array[StyleBoxFlat] = []
+var _btn_hover_styles: Array[StyleBoxFlat] = []
+var _last_btn_color := Color.WHITE
+
+func _setup_mute_buttons() -> void:
+	var canvas := CanvasLayer.new()
+	canvas.layer = 60
+	add_child(canvas)
+
+	var row := HBoxContainer.new()
+	row.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	row.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	row.add_theme_constant_override("separation", 2)
+	canvas.add_child(row)
+
+	_music_btn = _make_mute_button("♪")
+	_music_btn.pressed.connect(_on_music_mute_pressed)
+	row.add_child(_music_btn)
+
+	_sfx_btn = _make_mute_button("SFX")
+	_sfx_btn.pressed.connect(_on_sfx_mute_pressed)
+	row.add_child(_sfx_btn)
+
+	_update_mute_button(_music_btn, AudioManager.is_music_muted())
+	_update_mute_button(_sfx_btn, AudioManager.is_sfx_muted())
+	_refresh_mute_button_colors(modulate)
+	call_deferred("_equalize_button_sizes")
+
+func _equalize_button_sizes() -> void:
+	var w := maxf(_music_btn.size.x, _sfx_btn.size.x)
+	var h := maxf(_music_btn.size.y, _sfx_btn.size.y)
+	_music_btn.custom_minimum_size = Vector2(w, h)
+	_sfx_btn.custom_minimum_size = Vector2(w, h)
+
+func _make_btn_style(bg: Color, border: Color) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = bg
+	s.border_color = border
+	s.set_border_width_all(1)
+	s.set_content_margin_all(1)
+	return s
+
+func _make_mute_button(label: String) -> Button:
+	var btn := Button.new()
+	btn.text = label
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.add_theme_font_size_override("font_size", 9)
+	var c := modulate
+	var sn := _make_btn_style(Color.BLACK, c)
+	var sh := _make_btn_style(c, c)
+	var sp := _make_btn_style(Color.BLACK, c)
+	var sf := _make_btn_style(Color.BLACK, c)
+	btn.add_theme_stylebox_override("normal", sn)
+	btn.add_theme_stylebox_override("hover", sh)
+	btn.add_theme_stylebox_override("pressed", sp)
+	btn.add_theme_stylebox_override("focus", sf)
+	btn.add_theme_color_override("font_color", c)
+	btn.add_theme_color_override("font_hover_color", Color.BLACK)
+	btn.add_theme_color_override("font_pressed_color", c)
+	btn.add_theme_color_override("font_focus_color", c)
+	_btn_border_styles.append_array([sn, sp, sf])
+	_btn_hover_styles.append(sh)
+	return btn
+
+func _refresh_mute_button_colors(c: Color) -> void:
+	for s in _btn_border_styles:
+		s.border_color = c
+	for s in _btn_hover_styles:
+		s.bg_color = c
+		s.border_color = c
+	for btn in [_music_btn, _sfx_btn]:
+		if btn == null:
+			continue
+		btn.add_theme_color_override("font_color", c)
+		btn.add_theme_color_override("font_pressed_color", c)
+		btn.add_theme_color_override("font_focus_color", c)
+
+func _update_mute_button(btn: Button, muted: bool) -> void:
+	btn.modulate = Color(0.35, 0.35, 0.35) if muted else Color.WHITE
+
+func _on_music_mute_pressed() -> void:
+	_update_mute_button(_music_btn, AudioManager.toggle_music_mute())
+
+func _on_sfx_mute_pressed() -> void:
+	_update_mute_button(_sfx_btn, AudioManager.toggle_sfx_mute())
 
 
 func _setup_y_sort_children() -> void:
@@ -111,6 +202,9 @@ func _process(delta: float) -> void:
 	_shake_amount = lerpf(_shake_amount, 0.0, 20.0 * delta)
 	camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake_amount
 	_update_tab_label()
+	if modulate != _last_btn_color:
+		_last_btn_color = modulate
+		_refresh_mute_button_colors(modulate)
 
 func _update_tab_label() -> void:
 	if _tab_label == null:
@@ -126,6 +220,11 @@ func _update_tab_label() -> void:
 
 func _trigger_shake(strength: float) -> void:
 	_shake_amount = strength
+
+func shoot_door_ball(from: Vector2, to: Vector2, on_arrive: Callable) -> void:
+	var ball = DoorBallScene.new()
+	add_child(ball)
+	ball.launch(from, to, on_arrive)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("reset_room") and not player.movement_locked:
@@ -205,6 +304,9 @@ func _is_static_solid(grid_pos: Vector2i) -> bool:
 			return true
 	for wall in get_tree().get_nodes_in_group("breakable_walls"):
 		if not wall._destroyed and wall.get_grid_pos() == grid_pos:
+			return true
+	for boss_door in get_tree().get_nodes_in_group("boss_doors"):
+		if boss_door.get_grid_pos() == grid_pos:
 			return true
 	return false
 

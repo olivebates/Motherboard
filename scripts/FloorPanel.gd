@@ -33,6 +33,8 @@ func _process(delta: float) -> void:
 	if now_active != _active:
 		_active = now_active
 		queue_redraw()
+		if _highlighted and _active:
+			_check_all_chain_activated()
 	if _highlighted:
 		_highlight_time += delta
 		queue_redraw()
@@ -45,6 +47,17 @@ func _draw() -> void:
 		var offset := HIGHLIGHT_BASE_OFFSET + sin(_highlight_time * PI) * 1.0
 		var rect := Rect2(-offset, -offset, 32.0 + offset * 2.0, 32.0 + offset * 2.0)
 		draw_rect(rect, HIGHLIGHT_COLOR, false, HIGHLIGHT_LINE_WIDTH)
+
+func _check_all_chain_activated() -> void:
+	var chain_id = "chain1"
+	if id != chain_id and id2 != chain_id:
+		return
+	for p in get_tree().get_nodes_in_group("floor_panels"):
+		if (p.id == chain_id or p.id2 == chain_id) and not p._active:
+			return
+	for p in get_tree().get_nodes_in_group("floor_panels"):
+		if p.id == chain_id or p.id2 == chain_id:
+			p.set_highlight(false)
 
 func set_highlight(val: bool) -> void:
 	_highlighted = val

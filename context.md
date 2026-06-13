@@ -93,25 +93,25 @@ scenes/
   Enemy.tscn               — Enemy that walks toward the player; Front_Idle1.png sprite; CPUParticles2D death burst
   WaterEnemy.tscn          — WaterEnemy variant; uses WaterEnemy.gd; freezes when not in current room or when map overlay is open; ejects from solids each frame; supports boss_spawned flag
   WaterBoss.tscn           — Boss enemy; uses WaterBoss.gd; 2000 HP at 2× scale; place at tile top-left in any room
-  BossDoor.tscn            — Solid door that permanently disappears when the boss dies; uses locked_door1.png; in "boss_doors" group only (NOT push_blocks — has no push() method)
-  RoomSolvedTile.tscn      — Invisible floor tile; when stepped on for the first time marks the room as solved (snap SFX -14dB, 2px screen shake); solved rooms: doors permanently open, broken breakable walls stay broken; state saved per-room in SaveManager
+  BossDoor.tscn            — Solid door that permanently disappears when the boss dies; uses locked_door1.png; in "boss_doors" group only (NOT push_blocks — has no push() method); solid to player while visible (included in _is_static_solid)
+  RoomSolvedTile.tscn      — Invisible floor tile; if multiple tiles exist in a room the player must step on each one; only after all are stepped on does the snap SFX + 2px shake fire and the room get marked solved; solved rooms: doors permanently open, broken breakable walls stay broken; state saved per-room in SaveManager
   TimedObject.tscn         — Object that appears after 2 minutes in its room (chain upgrade not yet acquired); blinks every 0.5s while visible; slows player speed to 80% while visible; hides, restores speed, and resets timer on each room entry; always hidden once chain is acquired; uses arrow_up.png sprite
 
 scripts/
   GameManager.gd           — Autoload singleton (puzzle state + ability tracking)
-  AudioManager.gd          — Autoload singleton; manages all SFX and background music; SFX keys: character_death, electric_fail, electric_noise (loops while beam active, -26.1dB), electric_spawn, plant_stake, water_death, snap (-14dB, plays on room solved tile trigger); music keys: "Orange"=Motherboard_Level_Loop, "Yellow"=Motherboard_Title_Loop; all music streams start at -80dB and play immediately; set_music(key) crossfades over 1s (EASE_IN sine fade-out, EASE_OUT sine fade-in, both starting at -30dB so overlap is audible); first set_music call fades in over 3s (MUSIC_START_FADE); start_beam_noise()/stop_beam_noise() control the looping beam SFX; set_music() captures old key in local var before tween to avoid stale closure bug
-  Main.gd                  — Root scene controller; on room reset: plays character_death SFX; on prong spawn: plays plant_stake SFX; on room transition: plays music for new room anchor's music key; on teleport: fades static in over 0.4s then teleports (plays electric_spawn) and instantly hides static; boss_spawned_enemies in current room are queue_freed instead of reset; skips splash screen when SaveManager.skip_splash is true; TAB label above player has black outline (outline_size=2); resets breakable_walls in current room on room reset
-  Player.gd                — Player movement and input; exports start_with_push, start_with_chain, save_system_enabled; calls SaveManager.on_player_ready() at end of _ready(); var speed_multiplier: float = 1.0 scales movement (set by TimedObject)
+  AudioManager.gd          — Autoload singleton; manages all SFX and background music; SFX keys: character_death, electric_fail, electric_noise (loops while beam active, -26.1dB), electric_spawn, plant_stake, water_death, snap (-14dB, plays on room solved tile trigger); music keys: "Orange"=Motherboard_Level_Loop, "Yellow"=Motherboard_Title_Loop; all music streams start at -80dB and play immediately; set_music(key) crossfades over 1s (EASE_IN sine fade-out, EASE_OUT sine fade-in, both starting at -30dB so overlap is audible); first set_music call fades in over 3s (MUSIC_START_FADE); start_beam_noise()/stop_beam_noise() control the looping beam SFX; set_music() captures old key in local var before tween to avoid stale closure bug; toggle_music_mute()/toggle_sfx_mute() return new bool state and save pref; is_music_muted()/is_sfx_muted() getters; mute prefs saved to user://audio_prefs.json (separate from save slots), loaded at _ready() before first set_music(); set_music() and start_beam_noise() are no-ops when muted
+  Main.gd                  — Root scene controller; on room reset: plays character_death SFX; on prong spawn: plays plant_stake SFX; on room transition: plays music for new room anchor's music key; on teleport: fades static in over 0.4s then teleports (plays electric_spawn) and instantly hides static; boss_spawned_enemies in current room are queue_freed instead of reset; skips splash screen when SaveManager.skip_splash is true; TAB label above player has black outline (outline_size=2); resets breakable_walls in current room on room reset; shoot_door_ball(from, to, callback) spawns a DoorBall node that flies to the door and calls callback on arrival; ♪/SFX mute buttons in top-right corner (CanvasLayer layer=60); buttons styled with 1px StyleBoxFlat border+padding, tint-colored border/text matching Main.modulate (updated each frame), white bg on hover, same minimum size via _equalize_button_sizes() (deferred); muted buttons dim to 35% modulate
+  Player.gd                — Player movement and input; exports start_with_push, start_with_chain, save_system_enabled; calls SaveManager.on_player_ready() at end of _ready(); var speed_multiplier: float = 1.0 scales movement (set by TimedObject); push requires holding against a block for PUSH_HOLD_TIME=0.15s before it fires (_push_charge_time/_push_charge_dir/_push_charge_block track the charge; resets if direction/block changes or player moves freely); debug ability shortcuts (room_teleport_enabled only): Shift+P=push, Shift+O=chain, Shift+I=break
   SaveManager.gd           — Autoload singleton; save/load system; autosaves every 5s to active slot; slot 1 selected by default; number-key input only active when Player.save_system_enabled=true: 1–9 selects+loads slot, Shift+1–9 deletes, Alt+1–9 selects without loading; save_system_enabled=false auto-activates slot 1 for autosave but never loads on start; reloads scene on load (skip_splash=true); tracks key_doors_opened, boss_doors_opened, boss_defeated, rooms_solved (Array of [rx,ry]), breakables_destroyed (Array of [gx,gy]) for permanently-freed/persistent nodes; notify_room_solved(room) also snapshots all currently-destroyed breakable walls in that room; is_room_solved()/is_breakable_destroyed() queried by Door and BreakableWall; on load: restores destroyed breakables silently and re-opens doors in solved rooms after beam sync; status label (top-left, fades after 1.5s) for slot feedback; save files at user://save_slot_N.json
   Prong.gd                 — Prong placement logic
   PushBlock.gd             — Push block with sprite-lag animation; pushes enemies on contact
   ElectricBeam.gd          — Animated electricity beam (white, no transparency); calls AudioManager.start_beam_noise() on activate and stop_beam_noise() on deactivate
-  Door.gd                  — Door open/close logic; set_open(false) is ignored when SaveManager.is_room_solved() for the door's room (permanently open in solved rooms)
-  FloorPanel.gd            — Floor panel registration + circle-outline highlight + pulsing border highlight
+  Door.gd                  — Door open/close logic; set_open(false) is ignored when SaveManager.is_room_solved() for the door's room (permanently open in solved rooms); set_open(true) fires a DoorBall from the player to the door center — door stays solid and sprite hidden until ball arrives, then _do_open() runs the shrink animation; _opening flag prevents duplicate opens; set_open(false) cancels any in-flight open
+  FloorPanel.gd            — Floor panel registration + circle-outline highlight + pulsing border highlight; when a highlighted chain1 panel becomes active, checks if all other chain1 panels in the room are also active — if so, clears highlight on all of them
   LightningBlocker.gd      — Lightning blocker; alternates textures when active; plays electric_fail SFX when set_blocking(true)
   WallTileMap.gd           — TileMapLayer script for painting walls in-editor
   ResetEffect.gd           — CRT static CanvasLayer effect for room reset; play_teleport_buildup() fades in over 0.4s and stays; cancel() instantly hides
-  KeyDoor.gd               — Solid door; counts Keys in same room, opens with shrink-to-center animation; opens immediately on _count_keys() if room has zero keys; _open() calls SaveManager.notify_key_door_opened() before removing self from group
+  KeyDoor.gd               — Solid door; counts Keys in same room, opens with shrink-to-center animation; opens immediately on _count_keys() if room has zero keys; _open() fires a DoorBall then calls _do_open() on arrival (same ball pattern as Door.gd); _opening flag guards against duplicate opens; reset() cancels any in-flight open
   Key.gd                   — Collectible; shrinks to center on pickup, notifies KeyDoor
   Nut.gd                   — Pushable conductor; beam routes through it when chain ability active; pushes enemies on contact
   Screw.gd                 — Static conductor; beam routes through it when chain ability active; cannot be pushed
@@ -131,8 +131,9 @@ scripts/
   Enemy.gd                 — Enemy; walks toward player, blocked by walls/solids, killed by beam, resets player on contact; _eject_from_solid() BFS-finds nearest free tile when inside a solid
   WaterEnemy.gd            — Extends Enemy.gd; freezes movement when not in current room or when map overlay is open; calls _eject_from_solid() each frame; boss_spawned flag auto-adds to "boss_spawned_enemies" group (deleted on room exit/reset instead of reset); overrides _die() to play water_death SFX
   WaterBoss.gd             — Extends WaterEnemy.gd; 2× scale, 2000 HP; @export var debug_low_hp: bool sets HP to 10 at start if true; boss health bar via Utils (visible in boss home room when alive); takes 1 dmg/frame from beam (shake 1.0 + health bar shake+particles) + freeze-frame on first contact each exposure; teleports to random free tile (≥5 tiles from player, ≥2 tiles from room border) after 1.5s in beam; sprite slides to new position on teleport; speed scales with HP loss (BASE=40→MAX=100); spawns two WaterEnemy minions 3 tiles out below 80% HP with 0.7s scale-pulse telegraph (interval scales 4s→2s as HP drops, skips spawn if within 96px of player); charge attack: cooldown 3s, triggers when player within 5 tiles — 1s squash/stretch wind-up, then lunges at 240 px/s decelerating to normal speed; teleport mid-windup resets cooldown; phase 2 at 50% HP: screen shake + brief pause; death: series of 3 extreme shakes (0.5s apart), minion water_enemies in room deleted immediately (boss skips self in that loop), boss freezes 1s then arcs off screen in a parabola at z_index=100 with a slight rotation (dir * p * 0.8 rad) — doors open and particles fire once boss exits room bounds; sprite lag at half enemy speed (BOSS_SPRITE_SPEED=10); no modulation effects
-  BossDoor.gd              — Solid tile object in "boss_doors" group only (NOT push_blocks — has no push() method); provides grid_pos/start_grid_pos computed from position; open() calls SaveManager.notify_boss_door_opened() then queue_free(); reset() also frees if already opened (permanent removal)
-  RoomSolvedTile.gd        — Invisible floor tile (z_index=-10, group "room_solved_tiles"); positioned at tile top-left; triggers once when player body center grid pos matches tile; calls SaveManager.notify_room_solved(), plays snap SFX, emits shake_requested(2.0); auto-triggers on _ready() if room already solved (loaded from save)
+  BossDoor.gd              — Solid tile object in "boss_doors" group only (NOT push_blocks — has no push() method); provides grid_pos/start_grid_pos/get_grid_pos() computed from position; included in Main._is_static_solid() so it blocks player while visible; open() calls SaveManager.notify_boss_door_opened() then queue_free(); reset() also frees if already opened (permanent removal)
+  RoomSolvedTile.gd        — Invisible floor tile (z_index=-10, group "room_solved_tiles"); positioned at tile top-left; _triggered marks this tile stepped on; _trigger() checks all room_solved_tiles in the same room — only fires SaveManager.notify_room_solved(), snap SFX, and shake_requested(2.0) once every tile in the room has been stepped on; auto-triggers on _ready() if room already solved (loaded from save)
+  DoorBall.gd              — Short-lived Node2D (z_index=20) spawned by Main.shoot_door_ball(); draws a white filled circle (radius 5px) at its own origin; launch(from, to, on_arrive) tweens position from→to over 0.28s (EASE_IN SINE) then calls on_arrive and queue_free()s itself
   TimedObject.gd           — Node2D that tracks per-room-visit time; sprite (arrow_up.png) appears after 120s if player lacks chain ability; blinks every 0.5s while visible; sets player.speed_multiplier=0.8 while showing; resets (hides, restores speed, clears timer) each time the player enters its room; always hidden after chain ability granted; requires Sprite2D child named "Sprite2D"
 
 Sprites/
@@ -234,7 +235,7 @@ Sprites/
 ### Player.gd (Node2D)
 **Purpose:** Free pixel-based movement, push input, and prong placement.
 
-**Constants:** `SPEED=217.6 px/s` (20% reduced from original 272), `SPRITE_SPEED=24.0`, `CONTACT_EPS=0.1`, `PUSH_FREEZE=0.15`
+**Constants:** `SPEED=217.6 px/s` (20% reduced from original 272), `SPRITE_SPEED=24.0`, `CONTACT_EPS=0.1`, `PUSH_FREEZE=0.15`, `PUSH_HOLD_TIME=0.15`
 
 **Scene structure:** Root `Node2D` (script) → `Body` → `Sprite2D` + `Hitbox`. Root `position` = **hitbox bottom** (Y-sort + movement anchor). `Body` holds visuals/collision at tile-centered layout.
 
@@ -248,7 +249,7 @@ Sprites/
 
 **Save system:** `@export var save_system_enabled: bool = false`. If `false`, SaveManager auto-activates slot 1 and loads it on start. If `true`, the player manually picks a slot with 1–9. `SaveManager.on_player_ready(save_system_enabled)` is called at the end of `_ready()`.
 
-**Key variables:** `speed_multiplier: float = 1.0` — scales movement velocity; set to `0.8` by TimedObject while it is visible, restored to `1.0` when it hides.
+**Key variables:** `speed_multiplier: float = 1.0` — scales movement velocity; set to `0.8` by TimedObject while it is visible, restored to `1.0` when it hides. `_push_charge_time`, `_push_charge_dir`, `_push_charge_block` — track how long the player has held against a specific block; charge resets if direction/block changes or player moves freely; push fires only after `PUSH_HOLD_TIME=0.15s`.
 
 **Key functions:** `get_body_center()` → hitbox center world pos; `_hitbox_rect(pos)`, `_sprite_center()`, `_grid_to_world()` / `_world_to_grid()`, `reset_to(gp)`, `_try_push()`, `_start_push_lock(dir)`, `eject_from_solid()` — BFS from current grid pos to nearest free tile; called every frame in `_process` and at end of `reset_to`
 
@@ -327,7 +328,8 @@ Sprites/
 
 ### Door.gd (Node2D)
 - `@export var id: String` — matches FloorPanel IDs
-- `set_open(open)` — on open: emits `GameManager.shake_requested(5.0)`, brief white flash, then shrinks sprite toward its center over `ANIM_DURATION=0.15s` (scale + position compensated via `_apply_shrink_scale`) and hides; on close: starts at scale 0 centered, grows back to full size over 0.15s
+- `set_open(true)` — fires a DoorBall from the player to the door center via `Main.shoot_door_ball()`; door stays solid (`is_open` remains false) until ball arrives; `_opening` flag blocks duplicate calls; on arrival `_do_open()` sets `is_open=true`, emits `shake_requested(5.0)`, shrinks sprite toward center over `ANIM_DURATION=0.15s` and hides
+- `set_open(false)` — sets `_opening=false` (cancels in-flight open), then grows sprite from scale 0 back to full over 0.15s; ignored when room is solved
 - Added to group `"doors"`
 
 ---
@@ -337,9 +339,10 @@ Sprites/
 - Supports up to two IDs; both registered with `GameManager.register_floor_panel(gp, id, id2)`
 - Added to group `"floor_panels"` in `_ready()`
 - Sprite is hidden; drawn manually via `_draw()` so circle can render on top
-- `_process`: checks if any prong is within `PANEL_ACTIVATION_RADIUS` (24px) of panel center; calls `queue_redraw()` on state change; ticks `_highlight_time` when highlighted
+- `_process`: checks if any prong is within `PANEL_ACTIVATION_RADIUS` (24px) of panel center; calls `queue_redraw()` on state change; ticks `_highlight_time` when highlighted; on transition to active while highlighted calls `_check_all_chain_activated()`
 - `_draw()`: draws sprite texture; draws white circle outline (radius 17px) when active; draws pulsing white border (same as PushBlock) when highlighted
 - `set_highlight(val)` — enables/disables the pulsing border
+- `_check_all_chain_activated()` — if this panel has id/id2 `"chain1"`, scans all `"floor_panels"` in the group; if every chain1 panel is active, calls `set_highlight(false)` on all of them
 - Registers in GameManager with grid position
 
 ---
@@ -357,9 +360,9 @@ Sprites/
 ### KeyDoor.gd (Node2D)
 - No id export — matches keys by room position (`floori(pos / 800 or 384)`)
 - `_count_keys()` — deferred; counts all Keys in the same room
-- `key_collected()` — increments counter; opens when all collected
-- `_open()` — removes from group, emits `shake_requested(5.0)`, runs shrink-to-center tween (same as Door: scale+position compensated via `_apply_shrink_scale`, `ANIM_DURATION=0.15s`), then hides sprite permanently
-- `reset()` — if opened, returns immediately; kills any in-flight tween, restores sprite scale/position/visibility, re-adds to group
+- `key_collected()` — increments counter; calls `_open()` when all collected
+- `_open()` — guarded by `_opening` flag; fires a DoorBall via `Main.shoot_door_ball()`; on arrival `_do_open()` sets `_opened=true`, calls `SaveManager.notify_key_door_opened()`, removes from group, emits `shake_requested(5.0)`, runs shrink-to-center tween (`ANIM_DURATION=0.15s`), then hides sprite permanently
+- `reset()` — if opened, returns immediately; sets `_opening=false` to cancel in-flight open; kills any in-flight tween, restores sprite scale/position/visibility, re-adds to group
 
 ---
 
@@ -809,3 +812,6 @@ Enemy enters beam:
 | Water enemies eject from solids | Enemy.gd `_eject_from_solid()`; WaterEnemy.gd `_process` |
 | TimedObject: slow + blink after 2min in room | TimedObject.gd; Player.gd `speed_multiplier` |
 | TAB label black outline above player | Main.gd `_ready()` outline_size=2 |
+| Door-open ball animation (flies from player to door before it opens) | DoorBall.gd; Main.gd `shoot_door_ball()`; Door.gd `_do_open()`; KeyDoor.gd `_do_open()` |
+| Push hold delay (0.15s press before block moves) | Player.gd `_try_push()` charge accumulator |
+| ♪/SFX mute buttons (top-right, tint-colored, hover-inverts) | Main.gd `_setup_mute_buttons()`; AudioManager.gd `toggle_music_mute()`/`toggle_sfx_mute()` |

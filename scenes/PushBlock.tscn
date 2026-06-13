@@ -1,10 +1,7 @@
-[gd_scene load_steps=4 format=3 uid="uid://bsofnet43b8yv"]
+[gd_scene load_steps=3 format=3 uid="uid://bsofnet43b8yv"]
 
 [ext_resource type="Script" uid="uid://bbbtavw3kq2gs" path="res://scripts/PushBlock.gd" id="1_block"]
 [ext_resource type="Texture2D" uid="uid://bk6ecj1y6l5te" path="res://Sprites/SD_Card_block.png" id="2_xqocg"]
-
-[sub_resource type="RectangleShape2D" id="RectangleShape2D_xqocg"]
-size = Vector2(26, 26)
 
 [node name="PushBlock" type="Node2D"]
 script = ExtResource("1_block")
@@ -12,27 +9,3 @@ script = ExtResource("1_block")
 [node name="Sprite2D" type="Sprite2D" parent="."]
 texture = ExtResource("2_xqocg")
 centered = false
-
-[node name="Area2DLeft" type="Area2D" parent="."]
-
-[node name="CollisionShapeLeft" type="CollisionShape2D" parent="Area2DLeft"]
-position = Vector2(13, 16)
-shape = SubResource("RectangleShape2D_xqocg")
-
-[node name="Area2DRight" type="Area2D" parent="."]
-
-[node name="CollisionShapeRight" type="CollisionShape2D" parent="Area2DRight"]
-position = Vector2(19, 16)
-shape = SubResource("RectangleShape2D_xqocg")
-
-[node name="Area2DUp" type="Area2D" parent="."]
-
-[node name="CollisionShapeUp" type="CollisionShape2D" parent="Area2DUp"]
-position = Vector2(16, 13)
-shape = SubResource("RectangleShape2D_xqocg")
-
-[node name="Area2DDown" type="Area2D" parent="."]
-
-[node name="CollisionShapeDown" type="CollisionShape2D" parent="Area2DDown"]
-position = Vector2(16, 19)
-shape = SubResource("RectangleShape2D_xqocg")

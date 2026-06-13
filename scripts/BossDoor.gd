@@ -13,6 +13,9 @@ var start_grid_pos: Vector2i:
 func _ready() -> void:
 	add_to_group("boss_doors")
 
+func get_grid_pos() -> Vector2i:
+	return Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
+
 func get_collision_rect() -> Rect2:
 	return Rect2(position.x, position.y, float(TILE_SIZE), float(TILE_SIZE))
 

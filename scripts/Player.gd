@@ -6,6 +6,7 @@ const SPEED := 217.6
 const SPRITE_SPEED := 24.0
 const CONTACT_EPS := 0.1
 const PUSH_FREEZE := 0.15
+const PUSH_HOLD_TIME := 0.15
 
 @export var start_with_push: bool = false
 @export var start_with_chain: bool = false
@@ -17,6 +18,9 @@ var visual_pos: Vector2
 var speed_multiplier := 1.0
 var _push_lock_dir := Vector2i.ZERO
 var _push_tween: Tween
+var _push_charge_time := 0.0
+var _push_charge_dir := Vector2i.ZERO
+var _push_charge_block: Node = null
 var _main: Node2D
 
 @onready var _body: Node2D = $Body
@@ -90,7 +94,7 @@ func _process(delta: float) -> void:
 	position = y_move.pos
 	var moved_y: bool = y_move.moved
 
-	var pushed := _try_push(raw, moved_x, moved_y, main)
+	var pushed := _try_push(raw, moved_x, moved_y, main, delta)
 
 	var target_scale := Vector2.ONE
 	if pushed:
@@ -125,6 +129,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				GameManager.grant_ability("push")
 			elif event.keycode == KEY_O:
 				GameManager.grant_ability("chain")
+			elif event.keycode == KEY_I:
+				GameManager.grant_ability("break")
 			if dir != Vector2i.ZERO:
 				_try_room_teleport(dir)
 
@@ -211,8 +217,11 @@ func _move_axis_y(pos: Vector2, dy: float, main: Node) -> Dictionary:
 	var moved := absf(allowed) > 0.001
 	return {"pos": Vector2(pos.x, pos.y + allowed), "moved": moved}
 
-func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node) -> bool:
+func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: float) -> bool:
 	if not GameManager.has_ability("push"):
+		_push_charge_time = 0.0
+		_push_charge_dir = Vector2i.ZERO
+		_push_charge_block = null
 		return false
 	var dir := Vector2i.ZERO
 	if raw.x > 0.0 and raw.y == 0.0:
@@ -224,24 +233,52 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node) -> bool:
 	elif raw.y < 0.0 and raw.x == 0.0:
 		dir = Vector2i(0, -1)
 	else:
+		_push_charge_time = 0.0
+		_push_charge_dir = Vector2i.ZERO
+		_push_charge_block = null
 		return false
 
 	if dir == _push_lock_dir:
 		return false
 
 	if dir.x != 0 and moved_x:
+		_push_charge_time = 0.0
+		_push_charge_dir = Vector2i.ZERO
+		_push_charge_block = null
 		return false
 	if dir.y != 0 and moved_y:
+		_push_charge_time = 0.0
+		_push_charge_dir = Vector2i.ZERO
+		_push_charge_block = null
 		return false
 
 	var block: Node = main.get_push_block_at_face(_hitbox_rect(position), dir, _sprite_center())
 	if block == null:
+		_push_charge_time = 0.0
+		_push_charge_dir = Vector2i.ZERO
+		_push_charge_block = null
 		return false
 
 	var dest: Vector2i = block.grid_pos + dir
 	if not main.can_push_block_to(dest):
+		_push_charge_time = 0.0
+		_push_charge_dir = Vector2i.ZERO
+		_push_charge_block = null
 		return false
 
+	if dir == _push_charge_dir and block == _push_charge_block:
+		_push_charge_time += delta
+	else:
+		_push_charge_dir = dir
+		_push_charge_block = block
+		_push_charge_time = delta
+
+	if _push_charge_time < PUSH_HOLD_TIME:
+		return false
+
+	_push_charge_time = 0.0
+	_push_charge_dir = Vector2i.ZERO
+	_push_charge_block = null
 	block.push(dir)
 	_start_push_lock(dir)
 	main._trigger_shake(0.8)
