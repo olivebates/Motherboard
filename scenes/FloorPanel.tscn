@@ -1,7 +1,7 @@
-[gd_scene load_steps=3 format=3 uid="uid://b00000006"]
+[gd_scene load_steps=3 format=3 uid="uid://ruesfdrt8v4p"]
 
 [ext_resource type="Script" uid="uid://djpdo0xjjcxm1" path="res://scripts/FloorPanel.gd" id="1_panel"]
-[ext_resource type="Texture2D" uid="uid://2q4msdbxm3lf" path="res://Sprites/positive.png" id="2_sabk6"]
+[ext_resource type="Texture2D" path="res://Sprites/positive.png" id="2_sabk6"]
 
 [node name="FloorPanel" type="Node2D"]
 z_index = -10

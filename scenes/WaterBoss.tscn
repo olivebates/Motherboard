@@ -1,10 +1,11 @@
-[gd_scene load_steps=3 format=3 uid="uid://bni84xjxentvc"]
+[gd_scene load_steps=3 format=3 uid="uid://dkn7mrvfr6hdi"]
 
 [ext_resource type="Script" uid="uid://biwhyjlxu1djc" path="res://scripts/WaterBoss.gd" id="1_boss"]
-[ext_resource type="Texture2D" uid="uid://bf8nbcsredium" path="res://Sprites/Front_Idle1.png" id="2_sprite"]
+[ext_resource type="Texture2D" path="res://Sprites/Front_Idle1.png" id="2_sprite"]
 
 [node name="WaterBoss" type="Node2D"]
 script = ExtResource("1_boss")
+debug_low_hp = null
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
 texture = ExtResource("2_sprite")

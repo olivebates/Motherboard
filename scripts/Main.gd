@@ -30,7 +30,7 @@ var _color_tween: Tween = null
 var _tab_canvas: CanvasLayer
 var _tab_label: Label
 
-const ProngScene = preload("res://scenes/Prong.tscn")
+const ProngScene = preload("res://scenes/player/Prong.tscn")
 const DoorBallScene = preload("res://scripts/DoorBall.gd")
 
 const ResetEffectScene = preload("res://scripts/ResetEffect.gd")
@@ -51,6 +51,9 @@ const Y_SORT_GROUPS := [
 	"screws",
 	"enemies",
 	"breakable_walls",
+	"fans",
+	"dust_piles",
+	"wind_turbines",
 ]
 
 func _ready() -> void:
@@ -237,9 +240,13 @@ func _reset_room() -> void:
 	player.lock_movement()
 	AudioManager.play_sfx("character_death")
 	reset_effect.play()
-	await reset_effect.peaked
 	var rx0 := current_room.x * ROOM_WIDTH
 	var ry0 := current_room.y * ROOM_HEIGHT
+	for fan in get_tree().get_nodes_in_group("fans"):
+		var fgp: Vector2i = fan.start_grid_pos
+		if fgp.x >= rx0 and fgp.x < rx0 + ROOM_WIDTH and fgp.y >= ry0 and fgp.y < ry0 + ROOM_HEIGHT:
+			fan.prepare_reset()
+	await reset_effect.peaked
 	for p in GameManager.prongs.duplicate():
 		var gp: Vector2i = p["grid_pos"]
 		if gp.x >= rx0 and gp.x < rx0 + ROOM_WIDTH and gp.y >= ry0 and gp.y < ry0 + ROOM_HEIGHT:
@@ -250,6 +257,10 @@ func _reset_room() -> void:
 		var sgp: Vector2i = block.start_grid_pos
 		if sgp.x >= rx0 and sgp.x < rx0 + ROOM_WIDTH and sgp.y >= ry0 and sgp.y < ry0 + ROOM_HEIGHT:
 			block.reset()
+	for fan in get_tree().get_nodes_in_group("fans"):
+		var fgp: Vector2i = fan.start_grid_pos
+		if fgp.x >= rx0 and fgp.x < rx0 + ROOM_WIDTH and fgp.y >= ry0 and fgp.y < ry0 + ROOM_HEIGHT:
+			fan.reset()
 	for wall in get_tree().get_nodes_in_group("breakable_walls"):
 		var wgp: Vector2i = wall.get_grid_pos()
 		if wgp.x >= rx0 and wgp.x < rx0 + ROOM_WIDTH and wgp.y >= ry0 and wgp.y < ry0 + ROOM_HEIGHT:
@@ -271,6 +282,14 @@ func _reset_room() -> void:
 				enemy.queue_free()
 			else:
 				enemy.reset()
+	for dust in get_tree().get_nodes_in_group("dust_piles"):
+		var dgp: Vector2i = dust.get_grid_pos()
+		if dgp.x >= rx0 and dgp.x < rx0 + ROOM_WIDTH and dgp.y >= ry0 and dgp.y < ry0 + ROOM_HEIGHT:
+			dust.reset()
+	for turbine in get_tree().get_nodes_in_group("wind_turbines"):
+		var tgp: Vector2i = turbine.get_grid_pos()
+		if tgp.x >= rx0 and tgp.x < rx0 + ROOM_WIDTH and tgp.y >= ry0 and tgp.y < ry0 + ROOM_HEIGHT:
+			turbine.reset()
 	player.reset_to(room_entry_positions.get(current_room, Vector2i(2, 2)))
 	await reset_effect.done
 	_resetting = false
@@ -307,6 +326,12 @@ func _is_static_solid(grid_pos: Vector2i) -> bool:
 			return true
 	for boss_door in get_tree().get_nodes_in_group("boss_doors"):
 		if boss_door.get_grid_pos() == grid_pos:
+			return true
+	for dust in get_tree().get_nodes_in_group("dust_piles"):
+		if not dust._destroyed and dust.get_grid_pos() == grid_pos:
+			return true
+	for turbine in get_tree().get_nodes_in_group("wind_turbines"):
+		if turbine.get_grid_pos() == grid_pos:
 			return true
 	return false
 
@@ -613,27 +638,36 @@ func _compute_beam_path(pos_a: Vector2, pos_b: Vector2) -> Array:
 
 	# Path stores Vector2 for prong endpoints and Node2D for nuts so ElectricBeam
 	# can resolve nut positions each frame and follow the sliding sprite.
-	var result := {"path": [], "len": INF}
-	_search_beam(pos_a, pos_b, nut_nodes, [pos_a], 0.0, result)
-	return result["path"]
+	return _nearest_first_beam(pos_a, pos_b, nut_nodes, [pos_a])
 
-func _search_beam(current: Vector2, target: Vector2, remaining: Array, path: Array, length: float, result: Dictionary) -> void:
-	var to_target := current.distance_to(target)
-	if length + to_target < result["len"] and _get_beam_blockers(current, target).is_empty():
-		result["len"] = length + to_target
-		result["path"] = path + [target]
+# Nearest-first DFS: at each hop, try candidates (nuts + target) sorted by distance
+# from the current position, backtracking if a chosen nut leads to a dead end.
+func _nearest_first_beam(current: Vector2, target: Vector2, remaining: Array, path: Array) -> Array:
+	var candidates: Array = []
+
+	if _get_beam_blockers(current, target).is_empty():
+		candidates.append({"dist": current.distance_to(target), "is_target": true, "idx": -1})
 
 	for i in range(remaining.size()):
+		var nut_pos: Vector2 = remaining[i].get_beam_point()
+		if _get_beam_blockers(current, nut_pos).is_empty():
+			candidates.append({"dist": current.distance_to(nut_pos), "is_target": false, "idx": i})
+
+	candidates.sort_custom(func(a, b): return a["dist"] < b["dist"])
+
+	for c in candidates:
+		if c["is_target"]:
+			return path + [target]
+		var i: int = c["idx"]
 		var nut: Node2D = remaining[i]
 		var nut_pos: Vector2 = nut.get_beam_point()
-		var to_nut := current.distance_to(nut_pos)
-		if length + to_nut >= result["len"]:
-			continue
-		if not _get_beam_blockers(current, nut_pos).is_empty():
-			continue
 		var next_remaining := remaining.duplicate()
 		next_remaining.remove_at(i)
-		_search_beam(nut_pos, target, next_remaining, path + [nut], length + to_nut, result)
+		var result := _nearest_first_beam(nut_pos, target, next_remaining, path + [nut])
+		if not result.is_empty():
+			return result
+
+	return []
 
 func _expand_connected_blockers(seed: Array) -> Array:
 	if seed.is_empty():

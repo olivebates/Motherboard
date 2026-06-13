@@ -1,6 +1,6 @@
-[gd_scene load_steps=3 format=3 uid="uid://passblock001"]
+[gd_scene load_steps=3 format=3 uid="uid://ckl0pdx6bluow"]
 
-[ext_resource type="Script" path="res://scripts/PassBlock.gd" id="1_pbscript"]
+[ext_resource type="Script" uid="uid://d2xynh8loj3d7" path="res://scripts/PassBlock.gd" id="1_pbscript"]
 [ext_resource type="Texture2D" path="res://Sprites/switch_open2.png" id="2_pbsprite"]
 
 [node name="PassBlock" type="Node2D"]

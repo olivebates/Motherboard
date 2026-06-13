@@ -1,0 +1,19 @@
+[gd_scene load_steps=4 format=3 uid="uid://b00000003"]
+
+[ext_resource type="Script" uid="uid://dikhlgakxtiyd" path="res://scripts/Prong.gd" id="1_prong"]
+[ext_resource type="Texture2D" uid="uid://bw85705xplos" path="res://Sprites/player/stake.png" id="2_klgda"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_hitbox"]
+size = Vector2(8, 8)
+
+[node name="Prong" type="Node2D"]
+script = ExtResource("1_prong")
+
+[node name="Body" type="Node2D" parent="."]
+
+[node name="Sprite2D" type="Sprite2D" parent="Body"]
+position = Vector2(-16, -16)
+texture = ExtResource("2_klgda")
+
+[node name="Hitbox" type="CollisionShape2D" parent="Body"]
+shape = SubResource("RectangleShape2D_hitbox")

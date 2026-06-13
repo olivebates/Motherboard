@@ -2,7 +2,7 @@ extends "res://scripts/WaterEnemy.gd"
 
 enum State { CHASE, WINDUP, CHARGE, SPAWN_TELEGRAPH, DYING }
 
-const MAX_HP = 1000
+const BOSS_MAX_HP := 1000
 const BASE_SPEED = 40.0
 const MAX_SPEED = 100.0
 const BOSS_SCALE = 2.0
@@ -15,11 +15,10 @@ const CHARGE_RANGE = 5.0 * 32.0
 const TELEGRAPH_DURATION = 0.7
 const BOSS_SPRITE_SPEED = 10.0
 
-const WaterEnemyScene = preload("res://scenes/WaterEnemy.tscn")
+const WaterEnemyScene = preload("res://scenes/enemies/WaterEnemy.tscn")
 
 @export var debug_low_hp: bool = false
 
-var hp = MAX_HP
 var _spawn_timer = SPAWN_INTERVAL
 var _charge_timer = CHARGE_INTERVAL
 var _charge_speed_current := 0.0
@@ -34,10 +33,14 @@ var _pulse_time := 0.0
 var _death_tween: Tween
 var _arc_started := false
 
+func get_max_hp() -> int:
+	return BOSS_MAX_HP
+
 func _ready() -> void:
 	super._ready()
 	add_to_group("water_boss")
 	scale = Vector2(BOSS_SCALE, BOSS_SCALE)
+	hp = get_max_hp()
 	if debug_low_hp:
 		hp = 10
 	call_deferred("_register_health_bar")
@@ -98,7 +101,7 @@ func _move_y(dy: float) -> void:
 # ── Main process ──────────────────────────────────────────────────────────────
 
 func _process(delta: float) -> void:
-	Utils.update_boss_health_bar(self, hp, MAX_HP, _in_current_room() and not _dead, _main.modulate)
+	Utils.update_boss_health_bar(self, hp, BOSS_MAX_HP, _in_current_room() and not _dead, _main.modulate)
 	if not _in_current_room():
 		return
 	if _state == State.DYING:
@@ -140,7 +143,7 @@ func _process(delta: float) -> void:
 	_was_in_beam = in_beam
 
 	# Phase 2 at 50% HP
-	if not _phase2_triggered and hp < MAX_HP * 0.5:
+	if not _phase2_triggered and hp < BOSS_MAX_HP * 0.5:
 		_phase2_triggered = true
 		_trigger_phase2()
 
@@ -171,7 +174,7 @@ func _process(delta: float) -> void:
 # ── States ────────────────────────────────────────────────────────────────────
 
 func _process_chase(delta: float, player: Node2D, target: Vector2) -> void:
-	var hp_ratio = float(hp) / float(MAX_HP)
+	var hp_ratio = float(hp) / float(BOSS_MAX_HP)
 	var spd = BASE_SPEED + (MAX_SPEED - BASE_SPEED) * (1.0 - hp_ratio)
 	var to_player = target - get_center()
 	if to_player.length() > 1.0:
@@ -179,10 +182,10 @@ func _process_chase(delta: float, player: Node2D, target: Vector2) -> void:
 		_move_x(vel.x)
 		_move_y(vel.y)
 
-	if hp < MAX_HP * 0.8:
+	if hp < BOSS_MAX_HP * 0.8:
 		_spawn_timer -= delta
 		if _spawn_timer <= 0.0:
-			#var hp_ratio = float(hp) / float(MAX_HP)
+			#var hp_ratio = float(hp) / float(BOSS_MAX_HP)
 			var phase_ratio = clampf(hp_ratio / 0.8, 0.0, 1.0)
 			_spawn_timer = lerpf(2.0, 4.0, phase_ratio)
 			_state = State.SPAWN_TELEGRAPH
@@ -210,7 +213,7 @@ func _process_windup(delta: float) -> void:
 		_state = State.CHARGE
 
 func _process_charge(delta: float, player: Node2D, _target: Vector2) -> void:
-	var hp_ratio = float(hp) / float(MAX_HP)
+	var hp_ratio = float(hp) / float(BOSS_MAX_HP)
 	var normal_speed = BASE_SPEED + (MAX_SPEED - BASE_SPEED) * (1.0 - hp_ratio)
 	_charge_speed_current = lerpf(_charge_speed_current, normal_speed, 5.0 * delta)
 	_move_x(_charge_dir.x * _charge_speed_current * delta)
@@ -373,7 +376,7 @@ func reset() -> void:
 	Engine.time_scale = 1.0
 	_in_phase_transition = false
 	super.reset()
-	hp = MAX_HP
+	hp = BOSS_MAX_HP
 	_spawn_timer = SPAWN_INTERVAL
 	_charge_timer = CHARGE_INTERVAL
 	_charge_speed_current = 0.0

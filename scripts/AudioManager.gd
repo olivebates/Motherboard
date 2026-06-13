@@ -1,18 +1,18 @@
 extends Node
 
 const _SFX_FILES := {
-	"character_death": "res://Sounds/Character_Death.ogg",
-	"electric_fail":   "res://Sounds/Electric_Fail.ogg",
-	"electric_noise":  "res://Sounds/Electric_Noise1.ogg",
-	"electric_spawn":  "res://Sounds/Electric_Spawn.ogg",
-	"plant_stake":     "res://Sounds/Plant_Stake1.ogg",
-	"water_death":     "res://Sounds/Water_Death.ogg",
-	"snap":            "res://Sounds/snap.ogg",
+	"character_death": "res://Sounds/sfx/Character_Death.ogg",
+	"electric_fail":   "res://Sounds/sfx/Electric_Fail.ogg",
+	"electric_noise":  "res://Sounds/sfx/Electric_Noise1.ogg",
+	"electric_spawn":  "res://Sounds/sfx/Electric_Spawn.ogg",
+	"plant_stake":     "res://Sounds/sfx/Plant_Stake1.ogg",
+	"water_death":     "res://Sounds/sfx/Water_Death.ogg",
+	"snap":            "res://Sounds/sfx/snap.ogg",
 }
 
 const _MUSIC_FILES := {
-	"Orange": "res://Sounds/Motherboard_Level_Loop.ogg",
-	"Yellow": "res://Sounds/Motherboard_Title_Loop.ogg",
+	"Orange": "res://Sounds/music/Motherboard_Level_Loop.ogg",
+	"Yellow": "res://Sounds/music/Motherboard_Title_Loop.ogg",
 }
 
 const MUSIC_FADE := 1.0

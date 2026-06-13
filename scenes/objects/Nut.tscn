@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://c8xg8wfwf8k2v"]
+
+[ext_resource type="Script" uid="uid://grdb180v2p5b" path="res://scripts/Nut.gd" id="1_nut"]
+[ext_resource type="Texture2D" uid="uid://ccm7tamrraan5" path="res://Sprites/objects/washer_block.png" id="2_wymcd"]
+
+[node name="Nut" type="Node2D"]
+script = ExtResource("1_nut")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_wymcd")
+centered = false

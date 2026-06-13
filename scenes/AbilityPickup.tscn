@@ -1,6 +1,6 @@
-[gd_scene load_steps=2 format=3 uid="uid://bq28aieurif4k"]
+[gd_scene load_steps=2 format=3 uid="uid://b1ppc273hw4e6"]
 
-[ext_resource type="Script" path="res://scripts/AbilityPickup.gd" id="1_apscript"]
+[ext_resource type="Script" uid="uid://cpao12nlbqnk3" path="res://scripts/AbilityPickup.gd" id="1_apscript"]
 
 [node name="AbilityPickup" type="Node2D"]
 script = ExtResource("1_apscript")

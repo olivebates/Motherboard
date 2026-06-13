@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://b00000004"]
+[gd_scene load_steps=2 format=3 uid="uid://cbnfj8re6bep5"]
 
 [ext_resource type="Script" uid="uid://46eiulqaq2s" path="res://scripts/ElectricBeam.gd" id="1_beam"]
 

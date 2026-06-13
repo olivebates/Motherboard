@@ -14,8 +14,8 @@ var _tex_open: Texture2D
 func _ready() -> void:
 	$Sprite2D.visible = false
 	add_to_group("teleport_panels")
-	_tex_closed = load("res://Sprites/teleport_closed.png")
-	_tex_open = load("res://Sprites/teleport_open.png")
+	_tex_closed = load("res://Sprites/objects/teleport_closed.png")
+	_tex_open = load("res://Sprites/objects/teleport_open.png")
 	queue_redraw()
 
 func get_grid_pos() -> Vector2i:

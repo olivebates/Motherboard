@@ -3,6 +3,7 @@ extends Node2D
 const TILE_SIZE := 32
 const WORLD_OFFSET := 0
 const SPEED := 217.6
+const WIND_FORCE := 60.0
 const SPRITE_SPEED := 24.0
 const CONTACT_EPS := 0.1
 const PUSH_FREEZE := 0.15
@@ -104,6 +105,18 @@ func _process(delta: float) -> void:
 	elif moved_y:
 		target_scale = Vector2(0.85, 1.15)
 	_sprite.scale = _sprite.scale.lerp(target_scale, 15.0 * delta)
+
+	var wind := Vector2.ZERO
+	for fan in get_tree().get_nodes_in_group("fans"):
+		if fan == _push_charge_block:
+			continue
+		if fan.is_active() and fan.is_position_in_airflow(get_body_center()):
+			wind += Vector2(fan.direction) * WIND_FORCE
+	if wind.length_squared() > 0.0:
+		var xw = _move_axis_x(position, wind.x * delta, main)
+		position = xw.pos
+		var yw = _move_axis_y(position, wind.y * delta, main)
+		position = yw.pos
 
 	if moved_x or moved_y:
 		main.check_room_transition(grid_pos, position)
@@ -241,19 +254,26 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: fl
 	if dir == _push_lock_dir:
 		return false
 
-	if dir.x != 0 and moved_x:
-		_push_charge_time = 0.0
-		_push_charge_dir = Vector2i.ZERO
-		_push_charge_block = null
-		return false
-	if dir.y != 0 and moved_y:
+	var block: Node = main.get_push_block_at_face(_hitbox_rect(position), dir, _sprite_center())
+	if block == null:
 		_push_charge_time = 0.0
 		_push_charge_dir = Vector2i.ZERO
 		_push_charge_block = null
 		return false
 
-	var block: Node = main.get_push_block_at_face(_hitbox_rect(position), dir, _sprite_center())
-	if block == null:
+	var pushing_fan_in_airflow = block.is_in_group("fans") and block.is_active() and block.is_position_in_airflow(get_body_center())
+	if dir.x != 0 and moved_x and not pushing_fan_in_airflow:
+		_push_charge_time = 0.0
+		_push_charge_dir = Vector2i.ZERO
+		_push_charge_block = null
+		return false
+	if dir.y != 0 and moved_y and not pushing_fan_in_airflow:
+		_push_charge_time = 0.0
+		_push_charge_dir = Vector2i.ZERO
+		_push_charge_block = null
+		return false
+
+	if _is_in_fan_airflow() and not block.is_in_group("fans"):
 		_push_charge_time = 0.0
 		_push_charge_dir = Vector2i.ZERO
 		_push_charge_block = null
@@ -288,6 +308,12 @@ func _sprite_center() -> Vector2:
 	if _sprite.texture:
 		return global_position + _body_offset + _sprite.position + _sprite.texture.get_size() * 0.5
 	return global_position + _body_offset
+
+func _is_in_fan_airflow() -> bool:
+	for fan in get_tree().get_nodes_in_group("fans"):
+		if fan.is_active() and fan.is_position_in_airflow(get_body_center()):
+			return true
+	return false
 
 func _is_movement_locked_on_axis(is_x: bool, delta_axis: float) -> bool:
 	if _push_lock_dir == Vector2i.ZERO or delta_axis == 0.0:

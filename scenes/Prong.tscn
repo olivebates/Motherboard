@@ -1,7 +1,7 @@
-[gd_scene load_steps=4 format=3 uid="uid://b00000003"]
+[gd_scene load_steps=4 format=3 uid="uid://cxo6fy44b15hl"]
 
 [ext_resource type="Script" uid="uid://dikhlgakxtiyd" path="res://scripts/Prong.gd" id="1_prong"]
-[ext_resource type="Texture2D" uid="uid://bw85705xplos" path="res://Sprites/stake.png" id="2_klgda"]
+[ext_resource type="Texture2D" path="res://Sprites/stake.png" id="2_klgda"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_hitbox"]
 size = Vector2(8, 8)

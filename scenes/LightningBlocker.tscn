@@ -1,7 +1,7 @@
-[gd_scene load_steps=3 format=3 uid="uid://ee2c4q2u127c"]
+[gd_scene load_steps=3 format=3 uid="uid://dus23lt2m1d6h"]
 
 [ext_resource type="Script" uid="uid://btx67pl4fifk6" path="res://scripts/LightningBlocker.gd" id="1"]
-[ext_resource type="Texture2D" uid="uid://cv7liaunp6p08" path="res://Sprites/resistor_small.png" id="2_vkb7c"]
+[ext_resource type="Texture2D" path="res://Sprites/resistor_small.png" id="2_vkb7c"]
 
 [node name="LightningBlocker" type="Node2D"]
 script = ExtResource("1")

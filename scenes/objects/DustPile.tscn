@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://dustpile001"]
+
+[ext_resource type="Script" path="res://scripts/DustPile.gd" id="1_dustpile"]
+[ext_resource type="Texture2D" path="res://Sprites/objects/Dust_Pile_Alternate.png" id="2_dustpile"]
+
+[node name="DustPile" type="Node2D"]
+script = ExtResource("1_dustpile")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_dustpile")
+centered = false

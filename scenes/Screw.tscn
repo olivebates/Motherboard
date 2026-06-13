@@ -1,7 +1,7 @@
-[gd_scene load_steps=3 format=3 uid="uid://b7kmir1724nor"]
+[gd_scene load_steps=3 format=3 uid="uid://bk7r41miqbhpa"]
 
 [ext_resource type="Script" uid="uid://udt6byexp1dp" path="res://scripts/Screw.gd" id="1_screw"]
-[ext_resource type="Texture2D" uid="uid://dk6tyu5t0p36h" path="res://Sprites/screw.png" id="2_8twk7"]
+[ext_resource type="Texture2D" path="res://Sprites/screw.png" id="2_8twk7"]
 
 [node name="Screw" type="Node2D"]
 script = ExtResource("1_screw")

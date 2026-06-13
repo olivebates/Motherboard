@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://passblock001"]
+
+[ext_resource type="Script" path="res://scripts/PassBlock.gd" id="1_pbscript"]
+[ext_resource type="Texture2D" path="res://Sprites/objects/switch_open2.png" id="2_pbsprite"]
+
+[node name="PassBlock" type="Node2D"]
+script = ExtResource("1_pbscript")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_pbsprite")
+centered = false

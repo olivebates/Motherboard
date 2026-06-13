@@ -6,7 +6,7 @@ func _ready() -> void:
 	var ts := TileSet.new()
 	ts.tile_size = Vector2i(32, 32)
 	var source := TileSetAtlasSource.new()
-	source.texture = load("res://Sprites/placeholder.png")
+	source.texture = load("res://Sprites/objects/placeholder.png")
 	source.texture_region_size = Vector2i(32, 32)
 	source.create_tile(Vector2i(0, 0))
 	ts.add_source(source, 0)

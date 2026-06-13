@@ -17,9 +17,9 @@ func _ready() -> void:
 	var gp := Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
 	GameManager.register_floor_panel(gp, id, id2)
 	if positive:
-		$Sprite2D.texture = load("res://Sprites/positive.png")
+		$Sprite2D.texture = load("res://Sprites/objects/positive.png")
 	else:
-		$Sprite2D.texture = load("res://Sprites/negative.png")
+		$Sprite2D.texture = load("res://Sprites/objects/negative.png")
 	$Sprite2D.hide()
 	queue_redraw()
 

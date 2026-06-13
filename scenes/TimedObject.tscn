@@ -1,7 +1,7 @@
-[gd_scene load_steps=3 format=3 uid="uid://j3lkk27c10bc"]
+[gd_scene load_steps=3 format=3 uid="uid://dlot8e3gtrfrl"]
 
 [ext_resource type="Script" uid="uid://bf6r1lrupcjwj" path="res://scripts/TimedObject.gd" id="1"]
-[ext_resource type="Texture2D" uid="uid://mk2nyk2r03qa" path="res://Sprites/arrow_up.png" id="2_qx762"]
+[ext_resource type="Texture2D" path="res://Sprites/arrow_up.png" id="2_qx762"]
 
 [node name="TimedObject" type="Node2D"]
 script = ExtResource("1")

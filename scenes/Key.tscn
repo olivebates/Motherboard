@@ -1,7 +1,7 @@
-[gd_scene load_steps=3 format=3 uid="uid://cq2juuhhlbhjv"]
+[gd_scene load_steps=3 format=3 uid="uid://k5bpdyn15e60"]
 
 [ext_resource type="Script" uid="uid://ckwlom0dkvalx" path="res://scripts/Key.gd" id="1_key"]
-[ext_resource type="Texture2D" uid="uid://d2tpnu70tgk7g" path="res://Sprites/key_file3.png" id="2_aruhq"]
+[ext_resource type="Texture2D" path="res://Sprites/key_file3.png" id="2_aruhq"]
 
 [node name="Key" type="Node2D"]
 z_index = 5

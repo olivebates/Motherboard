@@ -48,14 +48,17 @@ func _process(delta: float) -> void:
 	_visual_pos = _visual_pos.lerp(position, minf(1.0, SPRITE_SPEED * delta))
 	_sprite.position = _visual_pos - position
 
-	# Beam kill
-	if _main.electric_beam.active and _main.electric_beam.is_point_on_beam(get_center(), BEAM_RADIUS):
-		_die()
+	_handle_beam()
+	if _dead:
 		return
 
 	# Player contact → reset room
 	if not player.movement_locked and (target - get_center()).length() < CONTACT_DIST:
 		_main._reset_room()
+
+func _handle_beam() -> void:
+	if _main.electric_beam.active and _main.electric_beam.is_point_on_beam(get_center(), BEAM_RADIUS):
+		_die()
 
 func _move_x(dx: float) -> void:
 	if dx == 0.0:

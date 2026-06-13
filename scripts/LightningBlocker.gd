@@ -7,8 +7,8 @@ var _time := 0.0
 var _angle_seed := 0.0
 
 const SPARK_COUNT := 5
-const TEX_NORMAL := preload("res://Sprites/resistor_small.png")
-const TEX_ACTIVE := preload("res://Sprites/resistor_small2.png")
+const TEX_NORMAL := preload("res://Sprites/objects/resistor_small.png")
+const TEX_ACTIVE := preload("res://Sprites/objects/resistor_small2.png")
 
 func _ready() -> void:
 	add_to_group("lightning_blockers")

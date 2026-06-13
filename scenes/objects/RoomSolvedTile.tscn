@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://b5vxf4roqqohr"]
+
+[ext_resource type="Script" uid="uid://y4maq0iio4mp" path="res://scripts/RoomSolvedTile.gd" id="1_rmsolvd"]
+[ext_resource type="Texture2D" uid="uid://mk2nyk2r03qa" path="res://Sprites/objects/arrow_up.png" id="2_nupds"]
+
+[node name="RoomSolvedTile" type="Node2D"]
+script = ExtResource("1_rmsolvd")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+position = Vector2(16, 16)
+texture = ExtResource("2_nupds")

@@ -23,6 +23,7 @@ func set_abilities(d: Dictionary) -> void:
 
 var floor_panels: Dictionary = {}
 var doors: Dictionary = {}
+var wind_powered_ids: Array = []
 
 func register_floor_panel(grid_pos: Vector2i, id: String, id2: String = "") -> void:
 	var ids: Array = [id]
@@ -53,10 +54,19 @@ func clear_prongs() -> Array:
 	prongs.clear()
 	return removed
 
+func set_wind_power(turbine_id: String, powered: bool) -> void:
+	if powered:
+		if turbine_id not in wind_powered_ids:
+			wind_powered_ids.append(turbine_id)
+	else:
+		wind_powered_ids.erase(turbine_id)
+	evaluate_puzzle()
+
 func clear_scene_state() -> void:
 	prongs.clear()
 	doors.clear()
 	floor_panels.clear()
+	wind_powered_ids.clear()
 	beam_blocked = false
 
 const PANEL_ACTIVATION_RADIUS := 24.0
@@ -84,6 +94,10 @@ func evaluate_puzzle() -> void:
 			for id in ids_a:
 				if id in ids_b and id not in ids_to_open:
 					ids_to_open.append(id)
+
+	for id in wind_powered_ids:
+		if id not in ids_to_open:
+			ids_to_open.append(id)
 
 	for id in doors:
 		doors_update.emit(id, id in ids_to_open)

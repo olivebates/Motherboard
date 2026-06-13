@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://bsofnet43b8yv"]
+
+[ext_resource type="Script" uid="uid://bbbtavw3kq2gs" path="res://scripts/PushBlock.gd" id="1_block"]
+[ext_resource type="Texture2D" uid="uid://bk6ecj1y6l5te" path="res://Sprites/objects/SD_Card_block.png" id="2_xqocg"]
+
+[node name="PushBlock" type="Node2D"]
+script = ExtResource("1_block")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_xqocg")
+centered = false

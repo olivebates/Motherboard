@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://cys4tq2eiyc8w"]
+
+[ext_resource type="Script" path="res://scripts/WindTurbine.gd" id="1_windturbine"]
+[ext_resource type="Texture2D" path="res://Sprites/objects/placeholder.png" id="2_windturbine"]
+
+[node name="WindTurbine" type="Node2D"]
+script = ExtResource("1_windturbine")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_windturbine")
+centered = false
