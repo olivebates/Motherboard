@@ -11,6 +11,8 @@ const CONTACT_EPS := 0.1
 const _HIT_OFFSET := Vector2(6.0, 6.0)
 const _HIT_SIZE := Vector2(20.0, 20.0)
 
+@export var enemy_id: String = ""
+
 var _start_pos: Vector2
 var _dead := false
 var _main: Node2D
@@ -26,6 +28,9 @@ func _ready() -> void:
 	_visual_pos = position
 	_particles.one_shot = true
 	_particles.explosiveness = 1.0
+
+func is_dead() -> bool:
+	return _dead
 
 func get_center() -> Vector2:
 	return position + Vector2(16.0, 16.0)

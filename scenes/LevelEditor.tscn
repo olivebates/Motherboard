@@ -1,0 +1,207 @@
+[gd_scene load_steps=7 format=3 uid="uid://level_editor_01"]
+
+[ext_resource type="Script" path="res://scripts/LevelEditor.gd" id="1_editor"]
+[ext_resource type="Texture2D" uid="uid://bqsxa2us3f2p4" path="res://Sprites/environment/wall1.png" id="3_wall"]
+[ext_resource type="Texture2D" uid="uid://rxef42vfuoej" path="res://Sprites/ui/Circuit_Sprite_Sheet.webp" id="4_circuit"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_floor"]
+texture = ExtResource("4_circuit")
+texture_region_size = Vector2i(32, 32)
+0:0/0 = 0
+0:0/0/terrain_set = 0
+0:0/0/terrain = 0
+0:0/0/terrains_peering_bit/top_side = 0
+1:0/0 = 0
+1:0/0/terrain_set = 0
+1:0/0/terrain = 0
+1:0/0/terrains_peering_bit/left_side = 0
+2:0/0 = 0
+2:0/0/terrain_set = 0
+2:0/0/terrain = 0
+2:0/0/terrains_peering_bit/right_side = 0
+2:0/0/terrains_peering_bit/left_side = 0
+3:0/0 = 0
+3:0/0/terrain_set = 0
+3:0/0/terrain = 0
+3:0/0/terrains_peering_bit/left_side = 0
+3:0/0/terrains_peering_bit/top_side = 0
+4:0/0 = 0
+4:0/0/terrain_set = 0
+4:0/0/terrain = 0
+4:0/0/terrains_peering_bit/bottom_side = 0
+4:0/0/terrains_peering_bit/top_side = 0
+5:0/0 = 0
+5:0/0/terrain_set = 0
+5:0/0/terrain = 0
+5:0/0/terrains_peering_bit/bottom_side = 0
+5:0/0/terrains_peering_bit/top_side = 0
+6:0/0 = 0
+6:0/0/terrain_set = 0
+6:0/0/terrain = 0
+6:0/0/terrains_peering_bit/right_side = 0
+6:0/0/terrains_peering_bit/left_side = 0
+0:1/0 = 0
+0:1/0/terrain_set = 0
+0:1/0/terrain = 0
+0:1/0/terrains_peering_bit/right_side = 0
+1:1/0 = 0
+1:1/0/terrain_set = 0
+1:1/0/terrain = 0
+1:1/0/terrains_peering_bit/bottom_side = 0
+2:1/0 = 0
+2:1/0/terrain_set = 0
+2:1/0/terrain = 0
+2:1/0/terrains_peering_bit/right_side = 0
+2:1/0/terrains_peering_bit/top_side = 0
+3:1/0 = 0
+3:1/0/terrain_set = 0
+3:1/0/terrain = 0
+3:1/0/terrains_peering_bit/right_side = 0
+3:1/0/terrains_peering_bit/bottom_side = 0
+4:1/0 = 0
+4:1/0/terrain_set = 0
+4:1/0/terrain = 0
+4:1/0/terrains_peering_bit/bottom_side = 0
+4:1/0/terrains_peering_bit/left_side = 0
+5:1/0 = 0
+5:1/0/terrain_set = 0
+5:1/0/terrain = 0
+5:1/0/terrains_peering_bit/bottom_side = 0
+5:1/0/terrains_peering_bit/top_side = 0
+6:1/0 = 0
+6:1/0/terrain_set = 0
+6:1/0/terrain = 0
+6:1/0/terrains_peering_bit/right_side = 0
+6:1/0/terrains_peering_bit/left_side = 0
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wall"]
+texture = ExtResource("3_wall")
+texture_region_size = Vector2i(32, 32)
+0:0/0 = 0
+0:0/0/terrain_set = 0
+0:0/0/terrain = 0
+
+[sub_resource type="TileSet" id="TileSet_floor"]
+tile_size = Vector2i(32, 32)
+terrain_set_0/mode = 0
+terrain_set_0/terrain_0/name = "Circuit"
+terrain_set_0/terrain_0/color = Color(0.3, 0.8, 1.0, 1)
+sources/0 = SubResource("TileSetAtlasSource_floor")
+
+[sub_resource type="TileSet" id="TileSet_editor"]
+tile_size = Vector2i(32, 32)
+terrain_set_0/mode = 0
+terrain_set_0/terrain_0/name = "Wall"
+terrain_set_0/terrain_0/color = Color(0.5, 0.34375, 0.25, 1)
+sources/1 = SubResource("TileSetAtlasSource_wall")
+
+[node name="LevelEditor" type="Node2D"]
+script = ExtResource("1_editor")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(400, 192)
+
+[node name="EditorRoom" type="Node2D" parent="."]
+
+[node name="FloorLayer" type="TileMapLayer" parent="EditorRoom"]
+z_index = -2
+tile_set = SubResource("TileSet_floor")
+texture_filter = 1
+
+[node name="BorderWalls" type="TileMapLayer" parent="EditorRoom"]
+tile_set = SubResource("TileSet_editor")
+texture_filter = 1
+
+[node name="Walls" type="TileMapLayer" parent="EditorRoom"]
+tile_set = SubResource("TileSet_editor")
+texture_filter = 1
+
+[node name="YSortRoot" type="Node2D" parent="EditorRoom"]
+y_sort_enabled = true
+
+[node name="GhostSprite" type="Sprite2D" parent="EditorRoom"]
+visible = false
+z_index = 20
+centered = false
+
+[node name="PlayerMarker" type="Sprite2D" parent="EditorRoom"]
+visible = false
+z_index = 15
+centered = false
+
+[node name="GridOverlay" type="Node2D" parent="."]
+z_index = 9
+
+[node name="EditorUI" type="CanvasLayer" parent="."]
+layer = 10
+
+[node name="TopBar" type="HBoxContainer" parent="EditorUI"]
+anchors_preset = 5
+anchor_right = 1.0
+offset_bottom = 36
+grow_horizontal = 2
+
+[node name="SaveButton" type="Button" parent="EditorUI/TopBar"]
+text = "Save"
+
+[node name="LoadButton" type="Button" parent="EditorUI/TopBar"]
+text = "Load"
+
+[node name="Palette" type="PanelContainer" parent="EditorUI"]
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -360
+offset_right = 360
+offset_top = -80
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="List" type="GridContainer" parent="EditorUI/Palette"]
+columns = 3
+
+[node name="PropertiesPanel" type="PanelContainer" parent="EditorUI"]
+visible = false
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 40
+offset_left = -180
+offset_bottom = -256
+grow_horizontal = 0
+grow_vertical = 2
+
+[node name="List" type="VBoxContainer" parent="EditorUI/PropertiesPanel"]
+size_flags_horizontal = 3
+
+[node name="PlacingHint" type="Label" parent="EditorUI"]
+visible = false
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -150
+offset_top = -28
+offset_right = 150
+offset_bottom = -4
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_constants/outline_size = 4
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+horizontal_alignment = 1
+
+[node name="Toast" type="Label" parent="EditorUI"]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -120
+offset_top = -12
+offset_right = 120
+offset_bottom = 12
+grow_horizontal = 2
+grow_vertical = 2
+horizontal_alignment = 1
+vertical_alignment = 1

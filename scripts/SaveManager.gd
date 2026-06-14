@@ -69,6 +69,8 @@ func _process(delta: float) -> void:
 			call_deferred("_apply_load", d)
 		return
 
+	if not _save_system_enabled:
+		return
 	if active_slot == -1:
 		return
 	_autosave_timer += delta

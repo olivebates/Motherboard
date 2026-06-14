@@ -25,8 +25,11 @@ var _push_charge_block: Node = null
 var _main: Node2D
 
 @onready var _body: Node2D = $Body
-@onready var _sprite: Sprite2D = $Body/Sprite2D
+@onready var _sprite: AnimatedSprite2D = $Body/AnimatedSprite2D
 @onready var _hitbox: CollisionShape2D = $Body/Hitbox
+
+var _facing := "front"
+var _facing_right := true
 
 # Root position is hitbox bottom (Y-sort). Body holds sprite + hitbox at tile-center layout.
 var _half_w := 5.0
@@ -39,9 +42,10 @@ var grid_pos: Vector2i:
 		return _world_to_grid(position)
 
 func _ready() -> void:
+	$Sprite2D.visible = false
 	_main = get_tree().current_scene as Node2D
-	_sprite.centered = false
 	add_to_group("players")
+	_setup_animations()
 	var cfg := YSortHitboxBottom.read_hitbox(_hitbox)
 	_half_w = cfg.half_w
 	_half_h = cfg.half_h
@@ -56,6 +60,52 @@ func _ready() -> void:
 	eject_from_solid()
 	SaveManager.on_player_ready(save_system_enabled)
 
+func _setup_animations() -> void:
+	var frames = SpriteFrames.new()
+	frames.remove_animation("default")
+	_add_sheet(frames, "front_idle", "res://Sprites/player/Spark_Front_Idle.webp", 4, 2, 8, 8.0)
+	_add_sheet(frames, "front_run",  "res://Sprites/player/Spark_Front_Run.webp",  3, 2, 6, 12.0)
+	_add_sheet(frames, "side_idle",  "res://Sprites/player/Spark_Side_Idle.webp",  3, 2, 6, 8.0)
+	_add_sheet(frames, "side_run",   "res://Sprites/player/Spark_Side_Run.webp",   3, 2, 6, 12.0)
+	_add_sheet(frames, "back_idle",  "res://Sprites/player/Spark_Back_Idle.webp",  4, 2, 8, 8.0)
+	_add_sheet(frames, "back_run",   "res://Sprites/player/Spark_Back_Run.webp",   3, 2, 6, 12.0)
+	_add_sheet(frames, "teleport",   "res://Sprites/player/Teleport_Spritesheet.webp", 2, 2, 4, 12.0, false)
+	_sprite.sprite_frames = frames
+	_sprite.play("front_idle")
+
+func _add_sheet(frames: SpriteFrames, anim: String, path: String, cols: int, rows: int, count: int, fps: float, loop: bool = true) -> void:
+	var tex: Texture2D = load(path)
+	frames.add_animation(anim)
+	frames.set_animation_speed(anim, fps)
+	frames.set_animation_loop(anim, loop)
+	var f = 0
+	for row in range(rows):
+		for col in range(cols):
+			if f >= count:
+				break
+			var atlas = AtlasTexture.new()
+			atlas.atlas = tex
+			atlas.region = Rect2(col * 32, row * 32, 32, 32)
+			frames.add_frame(anim, atlas)
+			f += 1
+
+func _update_animation(raw: Vector2, moved_x: bool, moved_y: bool) -> void:
+	var is_moving = moved_x or moved_y
+	if raw.x > 0.0:
+		_facing = "side"
+		_facing_right = true
+	elif raw.x < 0.0:
+		_facing = "side"
+		_facing_right = false
+	elif raw.y < 0.0:
+		_facing = "back"
+	elif raw.y > 0.0:
+		_facing = "front"
+	var anim = _facing + ("_run" if is_moving else "_idle")
+	if _sprite.animation != anim:
+		_sprite.play(anim)
+	_sprite.flip_h = (_facing == "side" and not _facing_right)
+
 func get_body_center() -> Vector2:
 	return YSortHitboxBottom.hitbox_center_from_root(position, _body_offset, _hitbox_offset)
 
@@ -63,10 +113,14 @@ func _process(delta: float) -> void:
 	eject_from_solid()
 	var body_center := position + _body_offset
 	visual_pos = visual_pos.lerp(body_center, minf(1.0, SPRITE_SPEED * delta))
-	_sprite.position = visual_pos - body_center + YSortHitboxBottom.SPRITE_OFFSET
+	var lag := visual_pos - body_center
+	# Anchor squash/stretch at bottom-center of the 32×32 sprite
+	_sprite.position = lag + Vector2(-16.0 * _sprite.scale.x, 16.0 - 32.0 * _sprite.scale.y)
 
 	if movement_locked:
 		_sprite.scale = _sprite.scale.lerp(Vector2.ONE, 15.0 * delta)
+		if _sprite.animation.ends_with("_run"):
+			_sprite.play(_facing + "_idle")
 		return
 
 	var raw := Vector2(
@@ -96,6 +150,8 @@ func _process(delta: float) -> void:
 	var moved_y: bool = y_move.moved
 
 	var pushed := _try_push(raw, moved_x, moved_y, main, delta)
+
+	_update_animation(raw, moved_x, moved_y)
 
 	var target_scale := Vector2.ONE
 	if pushed:
@@ -273,11 +329,13 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: fl
 		_push_charge_block = null
 		return false
 
-	if _is_in_fan_airflow() and not block.is_in_group("fans"):
-		_push_charge_time = 0.0
-		_push_charge_dir = Vector2i.ZERO
-		_push_charge_block = null
-		return false
+	if not block.is_in_group("fans"):
+		var wind_dir := _get_fan_airflow_direction()
+		if wind_dir != Vector2i.ZERO and dir == -wind_dir:
+			_push_charge_time = 0.0
+			_push_charge_dir = Vector2i.ZERO
+			_push_charge_block = null
+			return false
 
 	var dest: Vector2i = block.grid_pos + dir
 	if not main.can_push_block_to(dest):
@@ -305,15 +363,16 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: fl
 	return true
 
 func _sprite_center() -> Vector2:
-	if _sprite.texture:
-		return global_position + _body_offset + _sprite.position + _sprite.texture.get_size() * 0.5
-	return global_position + _body_offset
+	return global_position + _body_offset + _sprite.position + Vector2(16.0, 16.0)
 
 func _is_in_fan_airflow() -> bool:
+	return _get_fan_airflow_direction() != Vector2i.ZERO
+
+func _get_fan_airflow_direction() -> Vector2i:
 	for fan in get_tree().get_nodes_in_group("fans"):
 		if fan.is_active() and fan.is_position_in_airflow(get_body_center()):
-			return true
-	return false
+			return fan.direction
+	return Vector2i.ZERO
 
 func _is_movement_locked_on_axis(is_x: bool, delta_axis: float) -> bool:
 	if _push_lock_dir == Vector2i.ZERO or delta_axis == 0.0:
@@ -351,6 +410,17 @@ func _grid_to_world(gp: Vector2i) -> Vector2:
 		WORLD_OFFSET + gp.y * TILE_SIZE + TILE_SIZE / 2
 	)
 	return YSortHitboxBottom.root_pos_from_hitbox_center(hitbox_center, _body_offset, _hitbox_offset)
+
+func play_teleport(reverse: bool = false) -> void:
+	if reverse:
+		_sprite.speed_scale = 0.5
+		_sprite.play_backwards("teleport")
+	else:
+		_sprite.speed_scale = 1.0
+		_sprite.play("teleport")
+	await _sprite.animation_finished
+	_sprite.speed_scale = 1.0
+	_sprite.play(_facing + "_idle")
 
 func lock_movement() -> void:
 	movement_locked = true

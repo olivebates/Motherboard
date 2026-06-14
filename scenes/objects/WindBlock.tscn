@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://windblock001"]
+
+[ext_resource type="Script" path="res://scripts/WindBlock.gd" id="1_windblock"]
+[ext_resource type="Texture2D" path="res://Sprites/objects/Dust_Pile.png" id="2_windblock"]
+
+[node name="WindBlock" type="Node2D"]
+script = ExtResource("1_windblock")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_windblock")
+centered = false

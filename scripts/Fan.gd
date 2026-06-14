@@ -34,6 +34,7 @@ var _hold_particles := false
 func _ready() -> void:
 	add_to_group("fans")
 	add_to_group("push_blocks")
+	add_to_group("nuts")
 	start_grid_pos = Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
 	grid_pos = start_grid_pos
 	position = Vector2(grid_pos.x * TILE_SIZE, grid_pos.y * TILE_SIZE)
@@ -84,6 +85,9 @@ func prepare_reset() -> void:
 	_blocks_in_airflow.clear()
 	_clear_particles()
 
+func get_beam_point() -> Vector2:
+	return global_position + sprite.position + Vector2(TILE_SIZE * 0.5, TILE_SIZE * 0.5)
+
 func is_active() -> bool:
 	return _on
 
@@ -91,7 +95,7 @@ func _on_doors_update(door_id: String, open: bool) -> void:
 	if door_id == id:
 		_on = open
 		if not _on:
-			_stop_particles()
+			_clear_particles()
 
 func _get_airflow_end_world() -> Vector2:
 	var gp = get_grid_pos()
@@ -140,7 +144,7 @@ func _push_blocks_in_airflow() -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	var current_bids: Dictionary = {}
 
-	for block in get_tree().get_nodes_in_group("push_blocks"):
+	for block in get_tree().get_nodes_in_group("wind_pushable"):
 		if not is_position_in_airflow(block.get_collision_rect().get_center()):
 			continue
 		var bid := block.get_instance_id()

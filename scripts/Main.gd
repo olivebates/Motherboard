@@ -54,6 +54,7 @@ const Y_SORT_GROUPS := [
 	"fans",
 	"dust_piles",
 	"wind_turbines",
+	"enemy_doors",
 ]
 
 func _ready() -> void:
@@ -232,6 +233,13 @@ func shoot_door_ball(from: Vector2, to: Vector2, on_arrive: Callable) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("reset_room") and not player.movement_locked:
 		_reset_room()
+	if event is InputEventKey and event.pressed and not event.echo:
+		if Input.is_key_pressed(KEY_K) and Input.is_key_pressed(KEY_C):
+			var other_keys = [KEY_W, KEY_A, KEY_S, KEY_D, KEY_SPACE, KEY_R,
+							  KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]
+			var any_other = other_keys.any(func(k): return Input.is_key_pressed(k))
+			if not any_other:
+				get_tree().change_scene_to_file("res://scenes/LevelEditor.tscn")
 
 func _reset_room() -> void:
 	if _resetting:
@@ -290,6 +298,10 @@ func _reset_room() -> void:
 		var tgp: Vector2i = turbine.get_grid_pos()
 		if tgp.x >= rx0 and tgp.x < rx0 + ROOM_WIDTH and tgp.y >= ry0 and tgp.y < ry0 + ROOM_HEIGHT:
 			turbine.reset()
+	for edoor in get_tree().get_nodes_in_group("enemy_doors"):
+		var egp: Vector2i = edoor.get_grid_pos()
+		if egp.x >= rx0 and egp.x < rx0 + ROOM_WIDTH and egp.y >= ry0 and egp.y < ry0 + ROOM_HEIGHT:
+			edoor.reset()
 	player.reset_to(room_entry_positions.get(current_room, Vector2i(2, 2)))
 	await reset_effect.done
 	_resetting = false
@@ -332,6 +344,9 @@ func _is_static_solid(grid_pos: Vector2i) -> bool:
 			return true
 	for turbine in get_tree().get_nodes_in_group("wind_turbines"):
 		if turbine.get_grid_pos() == grid_pos:
+			return true
+	for edoor in get_tree().get_nodes_in_group("enemy_doors"):
+		if not edoor.is_open and edoor.get_grid_pos() == grid_pos:
 			return true
 	return false
 
@@ -431,7 +446,7 @@ func check_room_transition(player_grid: Vector2i, player_pixel: Vector2 = Vector
 				return
 		_transition_to_room(player_room)
 
-func _transition_to_room(new_room: Vector2i) -> void:
+func _transition_to_room(new_room: Vector2i, auto_unlock: bool = true) -> void:
 	var direction := new_room - current_room
 	room_entry_positions[new_room] = player.grid_pos + direction
 
@@ -442,6 +457,11 @@ func _transition_to_room(new_room: Vector2i) -> void:
 	# Delete boss-spawned enemies in the room being left
 	var old_rx0 = current_room.x * ROOM_WIDTH
 	var old_ry0 = current_room.y * ROOM_HEIGHT
+
+	for fan in get_tree().get_nodes_in_group("fans"):
+		var fgp: Vector2i = fan.start_grid_pos
+		if fgp.x >= old_rx0 and fgp.x < old_rx0 + ROOM_WIDTH and fgp.y >= old_ry0 and fgp.y < old_ry0 + ROOM_HEIGHT:
+			fan._clear_particles()
 	for enemy in get_tree().get_nodes_in_group("boss_spawned_enemies"):
 		if not is_instance_valid(enemy):
 			continue
@@ -477,7 +497,8 @@ func _transition_to_room(new_room: Vector2i) -> void:
 	_cam_tween.set_ease(Tween.EASE_IN_OUT)
 	_cam_tween.set_trans(Tween.TRANS_SINE)
 	_cam_tween.tween_property(camera, "position", target, CAMERA_TWEEN_DURATION)
-	_cam_tween.finished.connect(func(): player.unlock_movement())
+	if auto_unlock:
+		_cam_tween.finished.connect(func(): player.unlock_movement())
 
 func set_entry_position_from_anchor(room: Vector2i) -> void:
 	var anchor := _get_anchor_for_room(room)
@@ -539,7 +560,7 @@ func _on_teleport_requested(room: Vector2i) -> void:
 
 func _complete_teleport(room: Vector2i) -> void:
 	player.lock_movement()
-	await get_tree().create_timer(0.4).timeout
+	await player.play_teleport()
 	AudioManager.play_sfx("electric_spawn")
 
 	var panel := _get_open_panel_for_room(room)
@@ -561,8 +582,10 @@ func _complete_teleport(room: Vector2i) -> void:
 
 	player.reset_to(dest_gp)
 	reset_effect.cancel()
-	_transition_to_room(room)
+	_transition_to_room(room, false)
 	room_entry_positions[room] = dest_gp
+	await player.play_teleport(true)
+	player.unlock_movement()
 
 func _find_nearest_open_tile(start: Vector2i) -> Vector2i:
 	var visited := { start: true }

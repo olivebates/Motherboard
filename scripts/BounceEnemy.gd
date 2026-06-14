@@ -2,7 +2,7 @@ extends "res://scripts/WaterEnemy.gd"
 
 enum MoveState { IDLE, HOP, JUMP_WINDUP, JUMP }
 
-const BOUNCE_MAX_HP := 100
+const BOUNCE_MAX_HP := 50
 const MOVE_SPEED := 0.286
 const SORT_ABOVE_WALLS_Z := 64
 const SPRITE_LAG_SPEED := 24.0
@@ -19,9 +19,15 @@ const JUMP_HEIGHT := 56.0
 const PATH_RECALC := 0.35
 const SCALE_LERP := 15.0
 
+const ROOM_WIDTH := 25
+const ROOM_HEIGHT := 12
+
 const _CARDINALS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)
 ]
+
+var _room_x0 := 0
+var _room_y0 := 0
 
 var _path: Array[Vector2i] = []
 var _path_timer := 0.0
@@ -36,15 +42,29 @@ var _wait_timer := 0.0
 var _wait_duration := 0.0
 var _hop_t := 0.0
 var _sprite_scale := Vector2.ONE
+var _idle_time := 0.0
 
 func get_max_hp() -> int:
 	return BOUNCE_MAX_HP
+
+func _handle_beam() -> void:
+	for fan in get_tree().get_nodes_in_group("fans"):
+		if fan.is_active() and fan.is_position_in_airflow(get_center()):
+			hp -= 1
+			_main._trigger_shake(2.0)
+			if hp <= 0:
+				hp = 0
+				_die()
+			return
 
 func _ready() -> void:
 	super._ready()
 	z_index = SORT_ABOVE_WALLS_Z
 	add_to_group("bounce_enemies")
 	hp = get_max_hp()
+	var start_gp := _world_to_grid(_start_pos)
+	_room_x0 = floori(float(start_gp.x) / ROOM_WIDTH) * ROOM_WIDTH
+	_room_y0 = floori(float(start_gp.y) / ROOM_HEIGHT) * ROOM_HEIGHT
 
 func _process(delta: float) -> void:
 	_update_health_bar()
@@ -68,7 +88,9 @@ func _process(delta: float) -> void:
 			var wait_t := 1.0 - (_wait_timer / _wait_duration)
 			_apply_scale_target(Vector2.ONE.lerp(LANDING_SQUASH, sin(wait_t * PI)), delta)
 		else:
-			_apply_scale_target(Vector2.ONE, delta)
+			_idle_time += delta
+			var bob := sin(_idle_time * TAU * 1.1) * 0.05
+			_apply_scale_target(Vector2(1.0 + bob, 1.0 - bob), delta)
 			_begin_next_step()
 	elif _move_state == MoveState.JUMP_WINDUP:
 		_process_windup(delta)
@@ -120,6 +142,7 @@ func _begin_next_step() -> void:
 		_path.clear()
 		return
 	_path.pop_front()
+	_idle_time = 0.0
 	_hop_from = position
 	_hop_to = _grid_to_world(next_gp)
 	if _is_jump_delta(from_gp, next_gp):
@@ -136,10 +159,10 @@ func _is_jump_delta(from_gp: Vector2i, to_gp: Vector2i) -> bool:
 	var d := to_gp - from_gp
 	if absi(d.x) == 2 and d.y == 0:
 		var wall_gp := from_gp + Vector2i(signi(d.x), 0)
-		return _main._is_static_solid(wall_gp) and _is_walkable(to_gp)
+		return _main.is_blocked(wall_gp) and _is_walkable(to_gp)
 	if absi(d.y) == 2 and d.x == 0:
 		var wall_gp := from_gp + Vector2i(0, signi(d.y))
-		return _main._is_static_solid(wall_gp) and _is_walkable(to_gp)
+		return _main.is_blocked(wall_gp) and _is_walkable(to_gp)
 	return false
 
 func _process_windup(delta: float) -> void:
@@ -185,23 +208,42 @@ func _grid_to_world(gp: Vector2i) -> Vector2:
 	return Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE)
 
 func _is_walkable(gp: Vector2i) -> bool:
+	if gp.x < _room_x0 or gp.x >= _room_x0 + ROOM_WIDTH:
+		return false
+	if gp.y < _room_y0 or gp.y >= _room_y0 + ROOM_HEIGHT:
+		return false
 	return not _main.is_blocked(gp)
 
 func _find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 	if from == to:
 		return []
+	# A* with Manhattan heuristic
+	var g_cost: Dictionary = { from: 0 }
 	var parents: Dictionary = { from: null }
-	var queue: Array[Vector2i] = [from]
+	# open set stored as [f_cost, Vector2i] pairs; we use a simple array and pop the min
+	var open: Array = [[absi(to.x - from.x) + absi(to.y - from.y), from]]
 	var found := false
-	while not queue.is_empty():
-		var cur: Vector2i = queue.pop_front()
+	while not open.is_empty():
+		# find and remove the entry with the lowest f_cost
+		var best_idx := 0
+		for i in range(1, open.size()):
+			if open[i][0] < open[best_idx][0]:
+				best_idx = i
+		var entry = open[best_idx]
+		open.remove_at(best_idx)
+		var cur: Vector2i = entry[1]
 		if cur == to:
 			found = true
 			break
+		var cur_g: int = g_cost[cur]
 		for neighbor in _path_neighbors(cur):
-			if not parents.has(neighbor):
+			var step_cost := (absi((neighbor - cur).x) + absi((neighbor - cur).y))
+			var new_g := cur_g + step_cost
+			if not g_cost.has(neighbor) or new_g < g_cost[neighbor]:
+				g_cost[neighbor] = new_g
 				parents[neighbor] = cur
-				queue.append(neighbor)
+				var h := absi(to.x - neighbor.x) + absi(to.y - neighbor.y)
+				open.append([new_g + h, neighbor])
 	if not found:
 		return []
 	var path: Array[Vector2i] = []
@@ -219,7 +261,7 @@ func _path_neighbors(gp: Vector2i) -> Array[Vector2i]:
 			result.append(step)
 		var wall := gp + d
 		var land := gp + d * 2
-		if _main._is_static_solid(wall) and _is_walkable(land):
+		if _main.is_blocked(wall) and _is_walkable(land):
 			result.append(land)
 	return result
 
@@ -230,6 +272,7 @@ func push(dir: Vector2i) -> void:
 	_wait_timer = 0.0
 	_wait_duration = 0.0
 	_hop_t = 0.0
+	_idle_time = 0.0
 	_sprite_scale = Vector2.ONE
 
 func reset() -> void:
@@ -242,5 +285,6 @@ func reset() -> void:
 	_windup_time = 0.0
 	_wait_timer = 0.0
 	_wait_duration = 0.0
+	_idle_time = 0.0
 	_sprite_scale = Vector2.ONE
 	_sprite.scale = Vector2.ONE
