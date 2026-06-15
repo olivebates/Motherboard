@@ -140,10 +140,10 @@ func _keycode_to_digit(keycode: Key) -> int:
 
 # ── Save ──────────────────────────────────────────────────────────────────────
 
-func save(slot: int) -> void:
+func _build_save_data() -> Dictionary:
 	var main := get_tree().current_scene
 	if main == null:
-		return
+		return {}
 	var player = main.player
 
 	var data := {}
@@ -198,9 +198,39 @@ func save(slot: int) -> void:
 			visited.append([rv.x, rv.y])
 	data["map_visited"] = visited
 
+	return data
+
+func save(slot: int) -> void:
+	var data = _build_save_data()
+	if data.is_empty():
+		return
 	var file := FileAccess.open(SAVE_DIR + "save_slot_%d.json" % slot, FileAccess.WRITE)
 	file.store_string(JSON.stringify(data))
 	file.close()
+
+func save_quicksave() -> void:
+	var data = _build_save_data()
+	if data.is_empty():
+		return
+	var file := FileAccess.open(SAVE_DIR + "quicksave.json", FileAccess.WRITE)
+	file.store_string(JSON.stringify(data))
+	file.close()
+
+func load_quicksave() -> void:
+	var path := SAVE_DIR + "quicksave.json"
+	if not FileAccess.file_exists(path):
+		get_tree().change_scene_to_file("res://scenes/Main.tscn")
+		return
+	var file := FileAccess.open(path, FileAccess.READ)
+	var result = JSON.parse_string(file.get_as_text())
+	file.close()
+	if not result is Dictionary:
+		get_tree().change_scene_to_file("res://scenes/Main.tscn")
+		return
+	_pending_data = result
+	skip_splash = true
+	GameManager.clear_scene_state()
+	get_tree().change_scene_to_file("res://scenes/Main.tscn")
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 
@@ -247,6 +277,7 @@ func _apply_load(data: Dictionary) -> void:
 	# Player position + ensure movement is unlocked
 	var pos_arr = data.get("player_pos", [0.0, 0.0])
 	player.position = Vector2(float(pos_arr[0]), float(pos_arr[1]))
+	player.visual_pos = player.position + player._body_offset
 	player.unlock_movement()
 
 	# Abilities
@@ -268,9 +299,11 @@ func _apply_load(data: Dictionary) -> void:
 				var new_gp = Vector2i(int(entry["current"][0]), int(entry["current"][1]))
 				block.grid_pos = new_gp
 				block.position = Vector2(new_gp.x * 32, new_gp.y * 32)
-				if block._tween:
-					block._tween.kill()
-				block.sprite.position = Vector2.ZERO
+				var t = block.get("_tween")
+				if t:
+					t.kill()
+				if block.get("sprite") != null:
+					block.sprite.position = Vector2.ZERO
 				break
 
 	# Keys collected

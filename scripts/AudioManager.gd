@@ -115,6 +115,27 @@ func set_music(key: String) -> void:
 		t.tween_property(_music[key], "volume_db", target_db, fade_in)
 		_music_tweens[key] = t
 
+func fade_out_music(duration: float) -> void:
+	if _current_music == "" or not _music.has(_current_music) or _music_muted:
+		return
+	if _music_tweens.has(_current_music) and _music_tweens[_current_music] != null:
+		_music_tweens[_current_music].kill()
+	var t := create_tween()
+	t.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_SINE)
+	t.tween_property(_music[_current_music], "volume_db", -80.0, duration)
+	_music_tweens[_current_music] = t
+
+func fade_in_music(duration: float) -> void:
+	if _current_music == "" or not _music.has(_current_music) or _music_muted:
+		return
+	if _music_tweens.has(_current_music) and _music_tweens[_current_music] != null:
+		_music_tweens[_current_music].kill()
+	var target_db = _MUSIC_VOLUME.get(_current_music, 0.0)
+	var t := create_tween()
+	t.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_SINE)
+	t.tween_property(_music[_current_music], "volume_db", target_db, duration)
+	_music_tweens[_current_music] = t
+
 func is_music_muted() -> bool:
 	return _music_muted
 

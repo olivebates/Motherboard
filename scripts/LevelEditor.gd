@@ -13,6 +13,10 @@ const WALL_SOURCE_ID = 1
 const PLAY_COLS = ROOM_COLS - 1  # 0–23
 const PLAY_ROWS = ROOM_ROWS - 1  # 0–10
 
+const PlayerScene = preload("res://scenes/player/Player.tscn")
+const ProngScene = preload("res://scenes/player/Prong.tscn")
+const ElectricBeamScene = preload("res://scenes/player/ElectricBeam.tscn")
+
 const SCENE_MAP = {
 	"PushBlock":        "res://scenes/objects/PushBlock.tscn",
 	"Nut":              "res://scenes/objects/Nut.tscn",
@@ -66,7 +70,7 @@ const PALETTE_SPRITES = {
 # ──────────────────────────────────────────────
 #  Enums
 # ──────────────────────────────────────────────
-enum Mode { BUILD, PLACING }
+enum Mode { BUILD, PLACING, PLAY }
 
 # ──────────────────────────────────────────────
 #  Node refs
@@ -79,6 +83,7 @@ enum Mode { BUILD, PLACING }
 @onready var ghost_sprite: Sprite2D            = $EditorRoom/GhostSprite
 @onready var player_marker: Sprite2D           = $EditorRoom/PlayerMarker
 @onready var grid_overlay: Node2D              = $GridOverlay
+@onready var top_bar: HBoxContainer            = $EditorUI/TopBar
 @onready var palette_panel: PanelContainer     = $EditorUI/Palette
 @onready var palette_list: GridContainer       = $EditorUI/Palette/List
 @onready var props_panel: PanelContainer       = $EditorUI/PropertiesPanel
@@ -112,7 +117,27 @@ var _ghost_tex_type: String = ""
 
 var _toast_tween: Tween = null
 
+# Play mode state
+var _play_player: Node = null
+var _play_beam: Node = null
+var _play_spawn_pos: Vector2i = Vector2i(2, 2)
+var _play_label: Label = null
+var _play_auto_save_data: Dictionary = {}
+
 var _music_btn: Button
+
+# ──────────────────────────────────────────────
+#  Wire mode
+# ──────────────────────────────────────────────
+const WIRE_BASE_COLORS = [
+	Color(0.25, 0.50, 1.00),  # BLUE   → id1
+	Color(1.00, 0.30, 0.30),  # RED    → id2
+	Color(0.20, 0.85, 0.25),  # GREEN  → id3
+	Color(1.00, 0.85, 0.10),  # YELLOW → id4
+]
+var _wire_mode: bool = false
+var _wire_color_index: int = 0
+var _wire_assignments: Dictionary = {}  # Node → int (color index)
 
 func _setup_mute_button() -> void:
 	var editor_ui := $EditorUI as CanvasLayer
@@ -157,6 +182,26 @@ func _on_music_mute_pressed() -> void:
 	AudioManager.toggle_music_mute()
 	_update_music_btn()
 
+func _setup_play_label() -> void:
+	var editor_ui = $EditorUI as CanvasLayer
+	_play_label = Label.new()
+	_play_label.text = "E: Wire    Q: Play"
+	_play_label.add_theme_color_override("font_color", Color.WHITE)
+	_play_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_play_label.add_theme_constant_override("outline_size", 2)
+	_play_label.add_theme_font_size_override("font_size", 12)
+	_play_label.anchor_left = 1.0
+	_play_label.anchor_right = 1.0
+	_play_label.anchor_top = 1.0
+	_play_label.anchor_bottom = 1.0
+	_play_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_play_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_play_label.offset_left = -160
+	_play_label.offset_right = -8
+	_play_label.offset_top = -26
+	_play_label.offset_bottom = -8
+	editor_ui.add_child(_play_label)
+
 func _ready() -> void:
 	AudioManager.set_music("LevelEditor")
 	_setup_mute_button()
@@ -177,13 +222,18 @@ func _ready() -> void:
 		player_marker.scale = Vector2(TILE_SIZE / float(pt.get_width()), TILE_SIZE / float(pt.get_height()))
 
 	grid_overlay.draw.connect(_draw_grid)
+	grid_overlay.draw.connect(_draw_wire_overlay)
 
+	$EditorUI/TopBar/ExitButton.pressed.connect(_on_exit_pressed)
 	$EditorUI/TopBar/SaveButton.pressed.connect(_on_save_pressed)
 	$EditorUI/TopBar/LoadButton.pressed.connect(_on_load_pressed)
+	$EditorUI/TopBar/ExportButton.pressed.connect(_on_export_pressed)
+	$EditorUI/TopBar/ImportButton.pressed.connect(_on_import_pressed)
 
 	_build_palette()
 	toast_label.visible = false
 	placing_hint.visible = false
+	_setup_play_label()
 
 	_place_border_walls()
 	_set_mode(Mode.BUILD)
@@ -292,6 +342,7 @@ func _apply_floor_fade(active: bool) -> void:
 func _set_mode(new_mode: int) -> void:
 	mode = new_mode
 
+	top_bar.visible = false
 	palette_panel.visible = false
 	props_panel.visible = false
 	placing_hint.visible = false
@@ -303,14 +354,24 @@ func _set_mode(new_mode: int) -> void:
 
 	match mode:
 		Mode.BUILD:
+			top_bar.visible = true
 			palette_panel.visible = true
 			props_panel.visible = selected_object != null
 			_apply_floor_fade(false)
 			_restore_objects()
+			if _play_label:
+				_play_label.text = "E: Wire    Q: Play"
 
 		Mode.PLACING:
 			placing_hint.text = "Space: Select Object"
 			placing_hint.visible = true
+			if _play_label:
+				_play_label.text = "E: Wire    Q: Play"
+
+		Mode.PLAY:
+			_wire_mode = false
+			if _play_label:
+				_play_label.text = "Q: Edit"
 
 # ──────────────────────────────────────────────
 #  Process — ghost sprite update
@@ -326,6 +387,9 @@ func _process(_delta: float) -> void:
 				_apply_level_data(data)
 			else:
 				_show_toast("Invalid level file!")
+
+	if _wire_mode and mode != Mode.PLAY:
+		grid_overlay.queue_redraw()
 
 	if mode != Mode.PLACING:
 		ghost_sprite.visible = false
@@ -368,18 +432,56 @@ func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	match event.keycode:
+		KEY_Q:
+			if mode == Mode.PLAY:
+				_exit_play_mode()
+			else:
+				_enter_play_mode()
+			get_viewport().set_input_as_handled()
+		KEY_R:
+			if mode == Mode.PLAY:
+				_reset_room()
+				get_viewport().set_input_as_handled()
+		KEY_E:
+			if mode != Mode.PLAY:
+				_toggle_wire_mode()
+				get_viewport().set_input_as_handled()
 		KEY_SPACE:
-			_set_mode(Mode.BUILD)
-			get_viewport().set_input_as_handled()
+			if mode != Mode.PLAY:
+				if _wire_mode:
+					_cycle_wire_color()
+				else:
+					_set_mode(Mode.BUILD)
+				get_viewport().set_input_as_handled()
 		KEY_ESCAPE:
-			_set_mode(Mode.BUILD)
-			get_viewport().set_input_as_handled()
+			if mode != Mode.PLAY:
+				if _wire_mode:
+					_toggle_wire_mode()
+				else:
+					_set_mode(Mode.BUILD)
+				get_viewport().set_input_as_handled()
 
 func _unhandled_input(event: InputEvent) -> void:
+	if mode == Mode.PLAY:
+		return
 	if not (event is InputEventMouseButton):
 		return
 
 	var mb = event as InputEventMouseButton
+
+	if _wire_mode:
+		var gp = world_to_grid(get_global_mouse_position())
+		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+			var obj = _object_at(gp)
+			if obj != null and obj.get("id") != null:
+				_wire_assignments[obj] = _wire_color_index
+				grid_overlay.queue_redraw()
+		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+			var obj = _object_at(gp)
+			if obj != null and _wire_assignments.has(obj):
+				_wire_assignments.erase(obj)
+				grid_overlay.queue_redraw()
+		return
 
 	if mode == Mode.PLACING:
 		if mb.button_index == MOUSE_BUTTON_LEFT:
@@ -471,6 +573,9 @@ func _handle_build_click(mb: InputEventMouseButton) -> void:
 			var existing = _object_at(gp)
 			if existing:
 				_delete_object(existing)
+			if player_spawn_pos == gp:
+				player_spawn_pos = Vector2i(-1, -1)
+				player_marker.visible = false
 
 # ──────────────────────────────────────────────
 #  Object / tile placement
@@ -545,6 +650,7 @@ func _place_object(type: String, gp: Vector2i) -> void:
 	placed_objects.append({ "node": inst, "type": type, "col": gp.x, "row": gp.y })
 
 func _delete_object(node: Node) -> void:
+	_wire_assignments.erase(node)
 	for i in range(placed_objects.size() - 1, -1, -1):
 		if placed_objects[i].node == node:
 			placed_objects.remove_at(i)
@@ -651,6 +757,14 @@ func _build_level_data() -> Dictionary:
 		if node.get("id2") != null: obj["id2"] = node.id2
 		if node.get("positive") != null: obj["positive"] = node.positive
 		data.objects.append(obj)
+	var wire_data = {}
+	for node in _wire_assignments:
+		if is_instance_valid(node):
+			for entry in placed_objects:
+				if entry.node == node:
+					wire_data[str(entry.col) + "," + str(entry.row)] = _wire_assignments[node]
+					break
+	data["wire_assignments"] = wire_data
 	return data
 
 func _apply_level_data(data: Dictionary) -> void:
@@ -701,6 +815,17 @@ func _apply_level_data(data: Dictionary) -> void:
 				if other.col == entry.col and other.row == entry.row and other.node != entry.node:
 					entry.node.modulate.a = 0.5
 					entry.node.z_index = 5
+					break
+
+	_wire_assignments.clear()
+	if data.has("wire_assignments"):
+		for key in data["wire_assignments"]:
+			var parts = (key as String).split(",")
+			var col = int(parts[0])
+			var row = int(parts[1])
+			for entry in placed_objects:
+				if entry.col == col and entry.row == row and entry.node.get("id") != null:
+					_wire_assignments[entry.node] = data["wire_assignments"][key]
 					break
 
 	_show_toast("Loaded!")
@@ -775,15 +900,23 @@ func _show_toast(msg: String) -> void:
 	_toast_tween.tween_property(toast_label, "modulate:a", 0.0, 0.5)
 	_toast_tween.tween_callback(func(): toast_label.visible = false; toast_label.modulate.a = 1.0)
 
+func _on_exit_pressed() -> void:
+	SaveManager.load_quicksave()
+
+func _make_dialog_label(text: String) -> Label:
+	var lbl = Label.new()
+	lbl.text = text
+	lbl.add_theme_constant_override("outline_size", 4)
+	lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	return lbl
+
 func _on_save_pressed() -> void:
 	var dialog = AcceptDialog.new()
 	dialog.title = "Save Level"
 	var vbox = VBoxContainer.new()
-	var lbl = Label.new()
-	lbl.text = "Level name:"
 	var edit = LineEdit.new()
 	edit.text = "my_level"
-	vbox.add_child(lbl)
+	vbox.add_child(_make_dialog_label("Level name:"))
 	vbox.add_child(edit)
 	dialog.add_child(vbox)
 	dialog.get_ok_button().text = "Save"
@@ -812,6 +945,68 @@ func _on_load_pressed() -> void:
 		_load_level(selected)
 	dialog.queue_free()
 
+func _encode_level_data(data: Dictionary) -> String:
+	var json_str = JSON.stringify(data)
+	var bytes = json_str.to_utf8_buffer()
+	var compressed = bytes.compress(FileAccess.COMPRESSION_DEFLATE)
+	return Marshalls.raw_to_base64(compressed)
+
+func _decode_level_string(encoded: String) -> Dictionary:
+	var compressed = Marshalls.base64_to_raw(encoded)
+	var decompressed = compressed.decompress_dynamic(-1, FileAccess.COMPRESSION_DEFLATE)
+	if decompressed.size() == 0:
+		return {}
+	var data = JSON.parse_string(decompressed.get_string_from_utf8())
+	if data == null:
+		return {}
+	return data
+
+func _on_export_pressed() -> void:
+	var data = _build_level_data()
+	if OS.get_name() != "Web":
+		_save_level("export")
+	var encoded = _encode_level_data(data)
+
+	var dialog = AcceptDialog.new()
+	dialog.title = "Export Level"
+	var vbox = VBoxContainer.new()
+	var edit = TextEdit.new()
+	edit.text = encoded
+	edit.custom_minimum_size = Vector2(480, 140)
+	edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	vbox.add_child(_make_dialog_label("Copy this export code:"))
+	vbox.add_child(edit)
+	dialog.add_child(vbox)
+	add_child(dialog)
+	dialog.popup_centered(Vector2(520, 220))
+	edit.select_all()
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
+
+func _on_import_pressed() -> void:
+	var dialog = AcceptDialog.new()
+	dialog.title = "Import Level"
+	var vbox = VBoxContainer.new()
+	var edit = TextEdit.new()
+	edit.custom_minimum_size = Vector2(480, 140)
+	edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	vbox.add_child(_make_dialog_label("Paste export code:"))
+	vbox.add_child(edit)
+	dialog.add_child(vbox)
+	dialog.get_ok_button().text = "Import"
+	add_child(dialog)
+	dialog.popup_centered(Vector2(520, 220))
+	await dialog.confirmed
+	var encoded = edit.text.strip_edges()
+	dialog.queue_free()
+	if encoded == "":
+		return
+	var data = _decode_level_string(encoded)
+	if data.is_empty():
+		_show_toast("Invalid export code!")
+		return
+	_apply_level_data(data)
+
 # ──────────────────────────────────────────────
 #  Player compatibility interface
 # ──────────────────────────────────────────────
@@ -822,7 +1017,33 @@ func tile_rect(gp: Vector2i) -> Rect2:
 
 func _is_static_solid(gp: Vector2i) -> bool:
 	if walls_tilemap == null: return false
-	return walls_tilemap.get_cell_source_id(gp) >= 0 or border_walls_tilemap.get_cell_source_id(gp) >= 0
+	if walls_tilemap.get_cell_source_id(gp) >= 0 or border_walls_tilemap.get_cell_source_id(gp) >= 0:
+		return true
+	for door in get_tree().get_nodes_in_group("doors"):
+		if not door.is_open and door.get_grid_pos() == gp:
+			return true
+	for door in get_tree().get_nodes_in_group("key_doors"):
+		if door.get_grid_pos() == gp:
+			return true
+	for blocker in get_tree().get_nodes_in_group("lightning_blockers"):
+		if blocker.get_grid_pos() == gp:
+			return true
+	for screw in get_tree().get_nodes_in_group("screws"):
+		if screw.get_grid_pos() == gp:
+			return true
+	for wall in get_tree().get_nodes_in_group("breakable_walls"):
+		if not wall._destroyed and wall.get_grid_pos() == gp:
+			return true
+	for dust in get_tree().get_nodes_in_group("dust_piles"):
+		if not dust._destroyed and dust.get_grid_pos() == gp:
+			return true
+	for turbine in get_tree().get_nodes_in_group("wind_turbines"):
+		if turbine.get_grid_pos() == gp:
+			return true
+	for edoor in get_tree().get_nodes_in_group("enemy_doors"):
+		if not edoor.is_open and edoor.get_grid_pos() == gp:
+			return true
+	return false
 
 func get_player_blocking_rects(area: Rect2) -> Array[Rect2]:
 	var rects: Array[Rect2] = []
@@ -840,8 +1061,22 @@ func get_player_blocking_rects(area: Rect2) -> Array[Rect2]:
 			if area.intersects(br): rects.append(br)
 	return rects
 
+func has_pass_block_at(gp: Vector2i) -> bool:
+	for block in get_tree().get_nodes_in_group("pass_blocks"):
+		if block.get_grid_pos() == gp:
+			return true
+	return false
+
+func is_blocked(gp: Vector2i) -> bool:
+	if _is_static_solid(gp):
+		return true
+	for block in get_tree().get_nodes_in_group("push_blocks"):
+		if block.grid_pos == gp:
+			return true
+	return false
+
 func can_push_block_to(gp: Vector2i) -> bool:
-	return not _is_static_solid(gp) and get_push_block_at(gp) == null
+	return not _is_static_solid(gp) and get_push_block_at(gp) == null and not has_pass_block_at(gp)
 
 func get_push_block_at(gp: Vector2i) -> Node:
 	for block in get_tree().get_nodes_in_group("push_blocks"):
@@ -878,4 +1113,317 @@ class _PlayerStub extends Node2D:
 var _stub_player: _PlayerStub = _PlayerStub.new()
 
 var player: Node2D:
-	get: return _stub_player
+	get:
+		if _play_player != null and is_instance_valid(_play_player):
+			return _play_player
+		return _stub_player
+
+var electric_beam: Node:
+	get: return _play_beam
+
+# ──────────────────────────────────────────────
+#  Play mode
+# ──────────────────────────────────────────────
+func _enter_play_mode() -> void:
+	_play_auto_save_data = _build_level_data()
+	if OS.get_name() != "Web":
+		DirAccess.make_dir_recursive_absolute("user://levels")
+		var file = FileAccess.open("user://levels/auto_save.json", FileAccess.WRITE)
+		if file:
+			file.store_string(JSON.stringify(_play_auto_save_data, "\t"))
+			file.close()
+
+	_play_spawn_pos = player_spawn_pos if player_spawn_pos != Vector2i(-1, -1) else Vector2i(2, 2)
+
+	_restore_objects()
+
+	for node in _wire_assignments:
+		if is_instance_valid(node) and node.get("id") != null:
+			node.id = "id" + str(_wire_assignments[node] + 1)
+
+	# Re-register everything because _ready() ran at placement time with empty IDs.
+	# Floor panels: GameManager.floor_panels must reflect new IDs for evaluate_puzzle().
+	for fp in get_tree().get_nodes_in_group("floor_panels"):
+		if fp.get("id") != null:
+			var gp = Vector2i(floori(fp.position.x / TILE_SIZE), floori(fp.position.y / TILE_SIZE))
+			var id2_val = fp.id2 if fp.get("id2") != null else ""
+			GameManager.register_floor_panel(gp, fp.id, id2_val)
+	# Doors & fans: GameManager.doors keys must match the new IDs so doors_update fires correctly.
+	GameManager.doors.clear()
+	for node in get_tree().get_nodes_in_group("doors"):
+		if node.get("id") != null and node.id != "":
+			GameManager.register_door(node, node.id)
+	for node in get_tree().get_nodes_in_group("fans"):
+		if node.get("id") != null and node.id != "":
+			GameManager.register_door(node, node.id)
+
+	_play_beam = ElectricBeamScene.instantiate()
+	add_child(_play_beam)
+
+	_play_player = PlayerScene.instantiate()
+	_play_player.start_with_push = true
+	_play_player.start_with_chain = true
+	_play_player.save_system_enabled = false
+	y_sort_root.add_child(_play_player)
+	_play_player.reset_to(_play_spawn_pos)
+	GameManager.grant_ability("break")
+
+	player_marker.visible = false
+
+	for door in get_tree().get_nodes_in_group("key_doors"):
+		door._keys_total = 0
+		door.call_deferred("_count_keys")
+
+	_set_mode(Mode.PLAY)
+
+func _exit_play_mode() -> void:
+	for p in GameManager.clear_prongs():
+		if is_instance_valid(p["node"]):
+			p["node"].queue_free()
+	_update_beam()
+
+	if is_instance_valid(_play_player):
+		_play_player.queue_free()
+	_play_player = null
+
+	if is_instance_valid(_play_beam):
+		_play_beam.queue_free()
+	_play_beam = null
+
+	GameManager.clear_scene_state()
+
+	if _play_auto_save_data.size() > 0:
+		_apply_level_data(_play_auto_save_data)
+		toast_label.visible = false
+	elif OS.get_name() != "Web":
+		_load_level("user://levels/auto_save.json")
+
+	player_marker.visible = player_spawn_pos != Vector2i(-1, -1)
+	_set_mode(Mode.BUILD)
+
+func spawn_prong(pixel_pos: Vector2) -> void:
+	AudioManager.play_sfx("plant_stake")
+	if GameManager.prongs.size() >= 2:
+		var oldest = GameManager.prongs[0]
+		GameManager.remove_prong(oldest["node"])
+		var pnode: Node2D = oldest["node"]
+		var tween = pnode.create_tween()
+		tween.tween_method(pnode.apply_clear_shrink, 1.0, 0.0, 0.15)
+		tween.tween_callback(pnode.queue_free)
+	var prong = ProngScene.instantiate()
+	y_sort_root.add_child(prong)
+	prong.setup(pixel_pos)
+	GameManager.place_prong(prong, world_to_grid(pixel_pos))
+	_update_beam()
+
+func _update_beam() -> void:
+	if _play_beam == null or not is_instance_valid(_play_beam):
+		return
+	var world_positions = GameManager.get_prong_world_positions()
+	if world_positions.size() == 2:
+		var path = _compute_beam_path(world_positions[0], world_positions[1])
+		if path.is_empty():
+			GameManager.beam_blocked = true
+			GameManager.evaluate_puzzle()
+			_play_beam.deactivate()
+			var blocking = _get_beam_blockers(world_positions[0], world_positions[1])
+			var flashing = _expand_connected_blockers(blocking)
+			for b in get_tree().get_nodes_in_group("lightning_blockers"):
+				b.set_blocking(b in flashing)
+		else:
+			GameManager.beam_blocked = false
+			GameManager.evaluate_puzzle()
+			_play_beam.activate(path)
+			for b in get_tree().get_nodes_in_group("lightning_blockers"):
+				b.set_blocking(false)
+	else:
+		GameManager.beam_blocked = false
+		GameManager.evaluate_puzzle()
+		_play_beam.deactivate()
+		for b in get_tree().get_nodes_in_group("lightning_blockers"):
+			b.set_blocking(false)
+
+func _reset_room() -> void:
+	if _play_player == null or not is_instance_valid(_play_player):
+		return
+	_play_player.lock_movement()
+	for p in GameManager.clear_prongs():
+		if is_instance_valid(p["node"]):
+			p["node"].queue_free()
+	_update_beam()
+	for entry in placed_objects:
+		if is_instance_valid(entry.node) and entry.node.has_method("reset"):
+			entry.node.reset()
+	_play_player.reset_to(_play_spawn_pos)
+	_play_player.unlock_movement()
+
+func _compute_beam_path(pos_a: Vector2, pos_b: Vector2) -> Array:
+	var nut_nodes: Array = []
+	if GameManager.has_ability("chain"):
+		for nut in get_tree().get_nodes_in_group("nuts"):
+			nut_nodes.append(nut)
+	return _nearest_first_beam(pos_a, pos_b, nut_nodes, [pos_a])
+
+func _nearest_first_beam(current: Vector2, target: Vector2, remaining: Array, path: Array) -> Array:
+	var candidates: Array = []
+	if _get_beam_blockers(current, target).is_empty():
+		candidates.append({"dist": current.distance_to(target), "is_target": true, "idx": -1})
+	for i in range(remaining.size()):
+		var nut_pos: Vector2 = remaining[i].get_beam_point()
+		if _get_beam_blockers(current, nut_pos).is_empty():
+			candidates.append({"dist": current.distance_to(nut_pos), "is_target": false, "idx": i})
+	candidates.sort_custom(func(a, b): return a["dist"] < b["dist"])
+	for c in candidates:
+		if c["is_target"]:
+			return path + [target]
+		var i: int = c["idx"]
+		var nut: Node2D = remaining[i]
+		var nut_pos: Vector2 = nut.get_beam_point()
+		var next_remaining = remaining.duplicate()
+		next_remaining.remove_at(i)
+		var result = _nearest_first_beam(nut_pos, target, next_remaining, path + [nut])
+		if not result.is_empty():
+			return result
+	return []
+
+func _get_beam_blockers(pos_a: Vector2, pos_b: Vector2) -> Array:
+	var blocking: Array = []
+	for b in get_tree().get_nodes_in_group("lightning_blockers"):
+		var gp = b.get_grid_pos()
+		var rect = Rect2(Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE), Vector2(TILE_SIZE, TILE_SIZE))
+		if _segment_intersects_rect(pos_a, pos_b, rect):
+			blocking.append(b)
+	return blocking
+
+func _expand_connected_blockers(seed: Array) -> Array:
+	if seed.is_empty():
+		return []
+	var blocker_by_pos: Dictionary = {}
+	for b in get_tree().get_nodes_in_group("lightning_blockers"):
+		blocker_by_pos[b.get_grid_pos()] = b
+	var result: Array = []
+	var visited: Dictionary = {}
+	var queue: Array = seed.duplicate()
+	for b in queue:
+		visited[b] = true
+		result.append(b)
+	while not queue.is_empty():
+		var current = queue.pop_front()
+		var gp: Vector2i = current.get_grid_pos()
+		for offset in [Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1)]:
+			var neighbor_pos = gp + offset
+			if blocker_by_pos.has(neighbor_pos):
+				var neighbor = blocker_by_pos[neighbor_pos]
+				if not visited.has(neighbor):
+					visited[neighbor] = true
+					result.append(neighbor)
+					queue.append(neighbor)
+	return result
+
+# ──────────────────────────────────────────────
+#  Wire mode helpers
+# ──────────────────────────────────────────────
+func _toggle_wire_mode() -> void:
+	if _wire_mode:
+		_wire_mode = false
+		_set_mode(Mode.BUILD)
+	else:
+		_set_mode(Mode.BUILD)
+		_wire_mode = true
+		top_bar.visible = false
+		palette_panel.visible = false
+		placing_hint.text = "Space: Cycle Color"
+		placing_hint.visible = true
+		if _play_label:
+			_play_label.text = "E: Edit    Q: Play"
+	grid_overlay.queue_redraw()
+
+func _cycle_wire_color() -> void:
+	var available = _get_available_color_indices()
+	if available.is_empty():
+		return
+	var pos = available.find(_wire_color_index)
+	_wire_color_index = available[(pos + 1) % available.size()] if pos >= 0 else available[0]
+	grid_overlay.queue_redraw()
+
+func _get_available_color_indices() -> Array:
+	var used: Dictionary = {}
+	for node in _wire_assignments:
+		if is_instance_valid(node):
+			used[_wire_assignments[node]] = true
+	var result = used.keys()
+	result.sort()
+	var next = 0
+	while used.has(next):
+		next += 1
+	result.append(next)
+	return result
+
+func _get_wire_color(idx: int) -> Color:
+	if idx < WIRE_BASE_COLORS.size():
+		return WIRE_BASE_COLORS[idx]
+	var rng = RandomNumberGenerator.new()
+	rng.seed = (idx + 1) * 7919
+	return Color(rng.randf_range(0.3, 1.0), rng.randf_range(0.3, 1.0), rng.randf_range(0.3, 1.0))
+
+func _draw_wire_overlay() -> void:
+	if not _wire_mode or mode == Mode.PLAY:
+		return
+
+	# Group object centers by color index
+	var color_groups: Dictionary = {}
+	for node in _wire_assignments:
+		if not is_instance_valid(node):
+			continue
+		var idx = _wire_assignments[node]
+		if not color_groups.has(idx):
+			color_groups[idx] = []
+		color_groups[idx].append(node.position + Vector2(16.0, 16.0))
+
+	# Draw shortest-path dotted lines for each color group
+	for idx in color_groups:
+		var pts: Array = color_groups[idx]
+		if pts.size() < 2:
+			continue
+		var color = _get_wire_color(idx)
+		var path = _wire_nearest_neighbor(pts)
+		for i in range(path.size() - 1):
+			grid_overlay.draw_dashed_line(path[i], path[i + 1], color, 1.5, 6.0)
+
+	# Draw dots on top of lines
+	for node in _wire_assignments:
+		if not is_instance_valid(node):
+			continue
+		var color = _get_wire_color(_wire_assignments[node])
+		var center = node.position + Vector2(16.0, 16.0)
+		grid_overlay.draw_circle(center, 8.0, Color.BLACK)
+		grid_overlay.draw_circle(center, 6.0, color)
+
+	# Draw cursor
+	var world_pos = get_global_mouse_position()
+	var gp = world_to_grid(world_pos)
+	if gp.x >= 0 and gp.x < PLAY_COLS and gp.y >= 0 and gp.y < PLAY_ROWS:
+		var cur_color = _get_wire_color(_wire_color_index)
+		var center = Vector2(gp.x * TILE_SIZE + 16.0, gp.y * TILE_SIZE + 16.0)
+		grid_overlay.draw_circle(center, 6.0, Color.BLACK)
+		grid_overlay.draw_circle(center, 4.5, cur_color)
+
+func _wire_nearest_neighbor(points: Array) -> Array:
+	var sorted = points.duplicate()
+	sorted.sort_custom(func(a, b):
+		if not is_equal_approx(a.x, b.x):
+			return a.x < b.x
+		return a.y < b.y)
+	return sorted
+
+func _segment_intersects_rect(a: Vector2, b: Vector2, rect: Rect2) -> bool:
+	if rect.has_point(a) or rect.has_point(b):
+		return true
+	var c = [rect.position,
+			  Vector2(rect.end.x, rect.position.y),
+			  rect.end,
+			  Vector2(rect.position.x, rect.end.y)]
+	for i in 4:
+		if Geometry2D.segment_intersects_segment(a, b, c[i], c[(i + 1) % 4]) != null:
+			return true
+	return false

@@ -11,6 +11,7 @@ const PUSH_HOLD_TIME := 0.15
 
 @export var start_with_push: bool = false
 @export var start_with_chain: bool = false
+@export var start_with_break: bool = false
 @export var save_system_enabled: bool = false
 @export var room_teleport_enabled: bool = false
 
@@ -57,6 +58,8 @@ func _ready() -> void:
 		GameManager.grant_ability("push")
 	if start_with_chain:
 		GameManager.grant_ability("chain")
+	if start_with_break:
+		GameManager.grant_ability("break")
 	eject_from_solid()
 	SaveManager.on_player_ready(save_system_enabled)
 
@@ -439,6 +442,10 @@ func _is_inside_solid() -> bool:
 		if rect.intersects(solid):
 			return true
 	return false
+
+func look_up() -> void:
+	_facing = "back"
+	_sprite.play("back_idle")
 
 func eject_from_solid() -> void:
 	if not _is_inside_solid():

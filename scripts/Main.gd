@@ -59,7 +59,11 @@ const Y_SORT_GROUPS := [
 
 func _ready() -> void:
 	_setup_y_sort_children()
-	room_entry_positions[Vector2i(0, 0)] = Vector2i(2, 2)
+	current_room = Vector2i(
+		floori(float(player.grid_pos.x) / ROOM_WIDTH),
+		floori(float(player.grid_pos.y) / ROOM_HEIGHT)
+	)
+	room_entry_positions[current_room] = player.grid_pos
 	reset_effect = ResetEffectScene.new()
 	add_child(reset_effect)
 	ability_message = AbilityMessageScene.new()
@@ -70,7 +74,7 @@ func _ready() -> void:
 	map_overlay.setup(self, wall_tilemap)
 	map_overlay.teleport_requested.connect(_on_teleport_requested)
 	map_overlay.visit(current_room)
-	camera.position = _room_center(Vector2i(0, 0))
+	camera.position = _room_center(current_room)
 	GameManager.shake_requested.connect(_trigger_shake)
 	_tab_canvas = CanvasLayer.new()
 	_tab_canvas.layer = 5
@@ -239,6 +243,7 @@ func _unhandled_input(event: InputEvent) -> void:
 							  KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]
 			var any_other = other_keys.any(func(k): return Input.is_key_pressed(k))
 			if not any_other:
+				SaveManager.save_quicksave()
 				get_tree().change_scene_to_file("res://scenes/LevelEditor.tscn")
 
 func _reset_room() -> void:
@@ -478,6 +483,10 @@ func _transition_to_room(new_room: Vector2i, auto_unlock: bool = true) -> void:
 		var egp := Vector2i(floori(enemy._start_pos.x / TILE_SIZE), floori(enemy._start_pos.y / TILE_SIZE))
 		if egp.x >= erx0 and egp.x < erx0 + ROOM_WIDTH and egp.y >= ery0 and egp.y < ery0 + ROOM_HEIGHT:
 			enemy.reset()
+	for block in get_tree().get_nodes_in_group("push_blocks"):
+		var sgp: Vector2i = block.start_grid_pos
+		if sgp.x >= erx0 and sgp.x < erx0 + ROOM_WIDTH and sgp.y >= ery0 and sgp.y < ery0 + ROOM_HEIGHT:
+			block.reset()
 
 	var anchor := _get_anchor_for_room(new_room)
 	if anchor != null and anchor.color != modulate:

@@ -141,11 +141,20 @@ anchor_right = 1.0
 offset_bottom = 36
 grow_horizontal = 2
 
+[node name="ExitButton" type="Button" parent="EditorUI/TopBar"]
+text = "Exit"
+
 [node name="SaveButton" type="Button" parent="EditorUI/TopBar"]
 text = "Save"
 
 [node name="LoadButton" type="Button" parent="EditorUI/TopBar"]
 text = "Load"
+
+[node name="ExportButton" type="Button" parent="EditorUI/TopBar"]
+text = "Export"
+
+[node name="ImportButton" type="Button" parent="EditorUI/TopBar"]
+text = "Import"
 
 [node name="Palette" type="PanelContainer" parent="EditorUI"]
 anchor_left = 0.5

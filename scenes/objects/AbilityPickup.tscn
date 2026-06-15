@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://bq28aieurif4k"]
+[gd_scene load_steps=2 format=3 uid="uid://dl35aof7l5w87"]
 
 [ext_resource type="Script" path="res://scripts/AbilityPickup.gd" id="1_apscript"]
 

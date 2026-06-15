@@ -22,6 +22,7 @@ AbilityTutorial="*res://scripts/AbilityTutorial.gd"
 Utils="*res://scripts/Utils.gd"
 SaveManager="*res://scripts/SaveManager.gd"
 AudioManager="*res://scripts/AudioManager.gd"
+PowerOrbCounter="*res://scripts/PowerOrbCounter.gd"
 
 [display]
 

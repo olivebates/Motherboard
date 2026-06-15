@@ -92,14 +92,15 @@ scenes/
     PassBlock.tscn         — Passable block; player walks through, push blocks cannot enter
     BreakableWall.tscn     — Solid block destroyed by the electric beam (requires "break" ability); wall_breakable.png sprite; shakes 0.4s then particle burst; resets on room reset
     BossDoor.tscn          — Solid door that permanently disappears when the boss dies; uses locked_door1.png; in "boss_doors" group only (NOT push_blocks — has no push() method); solid to player while visible (included in _is_static_solid)
-    AbilityPickup.tscn     — Ability unlock pickup (white circle); exports: ability, message
+    PowerOrb.tscn          — Ability unlock pickup (white circle + rotating spike lines); @export ability: String; in "power_orbs" group; z_index default; no sprite child
+    OrbDisplay.tscn        — Floor decoration tracking collected PowerOrbs; drawn via _draw(); z_index=-10; in "orb_displays" group; not in Y_SORT_GROUPS
     AbilityGate.tscn       — Object hidden until a required ability is unlocked; TAB.png sprite
     TeleportPanel.tscn     — Interactive teleport panel; closed=solid, open=passable; exports: panel_name, one_way
     OnewayPanel.tscn       — TeleportPanel with one_way=true pre-set; player can teleport from it but not to it
     TeleportAnchor.tscn    — Room teleport anchor marker (legacy fallback)
     RoomSolvedTile.tscn    — Invisible floor tile; if multiple tiles exist in a room the player must step on each one; only after all are stepped on does the snap SFX + 2px shake fire and the room get marked solved; solved rooms: doors permanently open, broken breakable walls stay broken; state saved per-room in SaveManager
     TimedObject.tscn       — Object that appears after 2 minutes in its room (chain upgrade not yet acquired); blinks every 0.5s while visible; slows player speed to 80% while visible; hides, restores speed, and resets timer on each room entry; always hidden once chain is acquired; uses arrow_up.png sprite
-    FanDown.tscn / FanUp.tscn / FanLeft.tscn / FanRight.tscn — Fan objects (Fan_Front/Back/Left/Right.png); @export id: String turns fan on/off via GameManager doors_update (same as Door); @export direction: Vector2i pre-set per scene; in `"fans"` and `"push_blocks"` groups — solid to player via push-block collision; pushable from any direction (sprite-lag slide like PushBlock); when on: player in LOS of airflow receives +60px/s wind push; LOS = same row/column as fan, airflow passes through all solids and ends at room boundary; opaque white dust particles (CPUParticles2D child of Sprite2D, local_coords, z_index=10 above walls) flow along the 32px airflow band; particle color inherits Main.modulate; emitting stops when fan turns off (existing particles ride sprite during slide); wind_pushable objects in airflow are pushed every 0.8s after continuously occupying the stream for 0.8s if the destination tile is free (PushBlocks and Nuts are NOT pushed by fans — use WindBlock for fan-pushable objects); reset() on room reset; particles are destroyed and recreated (_clear_particles()) on room transition so they don't persist into the next room
+    FanDown.tscn / FanUp.tscn / FanLeft.tscn / FanRight.tscn — Fan objects (Fan_Front/Back/Left/Right.png); @export id: String turns fan on/off via GameManager doors_update (same as Door); @export direction: Vector2i pre-set per scene; in `"fans"`, `"push_blocks"`, and `"nuts"` groups — solid to player via push-block collision; pushable from any direction (sprite-lag slide like PushBlock); beam chains through fans when chain ability is active (same as Nut/Screw); when on: player in LOS of airflow receives +60px/s wind push; LOS = same row/column as fan, airflow passes through all solids and ends at room boundary; opaque white dust particles (CPUParticles2D child of Sprite2D, local_coords, z_index=10 above walls) flow along the 32px airflow band; particle color inherits Main.modulate; when fan turns off, _clear_particles() destroys and recreates the emitter so particles vanish instantly; wind_pushable objects in airflow are pushed every 0.8s after continuously occupying the stream for 0.8s if the destination tile is free (PushBlocks and Nuts are NOT pushed by fans — use WindBlock for fan-pushable objects); reset() on room reset; particles are destroyed and recreated (_clear_particles()) on room transition so they don't persist into the next room
     DustPile.tscn          — Destructible dust pile (Dust_Pile_Alternate.png); solid to player when visible (_destroyed=false); shakes 0.5s when a fan blows on it, then disappears with dust particles flowing in the fan direction; reset() restores it unless SaveManager.is_room_solved() for its room
     WindBlock.tscn         — Fan-pushable block (Dust_Pile.png); in "push_blocks" and "wind_pushable" groups (Dust_Pile.png); in "push_blocks" (player can push, collision checks, save/load) and "wind_pushable" (fan airflow pushes it); same sprite-lag slide mechanics as PushBlock; pushes enemies on contact; reset() restores start position; fans only push objects in "wind_pushable" — PushBlocks and Nuts are no longer pushed by fans
     WindTurbine.tscn       — Wind-powered turbine (placeholder.png); @export id: String; when any active fan blows on it, calls GameManager.set_wind_power(id, true) to open doors with matching id; glows yellow ring when powered; resets on room reset
@@ -108,7 +109,7 @@ scenes/
   enemies/
     Enemy.tscn             — Enemy that walks toward the player; Front_Idle1.png sprite; CPUParticles2D death burst
     WaterEnemy.tscn        — WaterEnemy variant; uses WaterEnemy.gd; 25 HP + sprite-width health bar; beam −1 HP/frame (2px shake); freezes when not in current room or when map overlay is open; ejects from solids each frame; supports boss_spawned flag
-    BounceEnemy.tscn       — BounceEnemy variant; extends WaterEnemy.gd; 100 HP; takes damage only from active fan airflow (−1 HP/frame, immune to electric beam); tile-to-tile pathfinding with 1-tile wall jumps; bounces instead of sliding; no wall collision; z_index=64 draws above walls
+    BounceEnemy.tscn       — BounceEnemy variant; extends WaterEnemy.gd; 50 HP; takes damage only from active fan airflow (−1 HP/frame, immune to electric beam); tile A* pathfinding (Manhattan heuristic) with 1-tile wall/push-block jumps, constrained to home room; bounces instead of sliding; idle rhythmic squish/squash animation; no wall collision; z_index=64 draws above walls
     WaterBoss.tscn         — Boss enemy; uses WaterBoss.gd; 1000 HP at 2× scale; place at tile top-left in any room
     BounceBoss.tscn        — Boss enemy; uses BounceBoss.gd; 5 HP at 2× scale (64×64); place at tile top-left in any room
     BounceBossPanel.tscn   — Interactive panel spawned dynamically by BounceBoss; positive/negative variants; activated when electric beam passes through it
@@ -120,12 +121,12 @@ scripts/
   LevelEditor.gd           — Level editor controller (see Level Editor section below); plays "LevelEditor" music on _ready(); ♪ mute button in top-right of EditorUI (matches Main.gd style, white tint); reflects and toggles AudioManager music mute state
   GameManager.gd           — Autoload singleton (puzzle state + ability tracking)
   AudioManager.gd          — Autoload singleton; manages all SFX and background music; SFX keys: character_death, electric_fail, electric_noise (loops while beam active, -26.1dB), electric_spawn, plant_stake, water_death, snap (-14dB, plays on room solved tile trigger); music keys: "Orange"=Motherboard_Level_Loop.ogg, "Yellow"=PlaceholderMusic/Yellow.mp3, "Blue"=PlaceholderMusic/Blue.mp3, "Red"=PlaceholderMusic/Red.mp3, "LevelEditor"=PlaceholderMusic/LevelEditor.mp3, "Boss"=PlaceholderMusic/Boss.mp3; supports both OGG and MP3 streams (sets loop on whichever type is loaded); all music streams start at -80dB and play immediately; set_music(key) crossfades over 1s — kills all in-progress tweens first (_music_tweens dict tracks one tween per key), silences any track that is neither outgoing nor incoming, fades old to -80dB and new from -30dB to 0dB; first set_music call fades in over 3s (MUSIC_START_FADE); start_beam_noise()/stop_beam_noise() control the looping beam SFX; toggle_music_mute()/toggle_sfx_mute() return new bool state and save pref; is_music_muted()/is_sfx_muted() getters; mute prefs saved to user://audio_prefs.json (separate from save slots), loaded at _ready() before first set_music(); set_music() and start_beam_noise() are no-ops when muted
-  Main.gd                  — Root scene controller; on room reset: plays character_death SFX; on prong spawn: plays plant_stake SFX; on room transition: plays music for new room anchor's music key, calls _clear_particles() on all fans in the room being left; on teleport: fades static in over 0.4s then teleports (plays electric_spawn) and instantly hides static; boss_spawned_enemies in current room are queue_freed instead of reset; skips splash screen when SaveManager.skip_splash is true; TAB label above player has black outline (outline_size=2); resets breakable_walls in current room on room reset; shoot_door_ball(from, to, callback) spawns a DoorBall node that flies to the door and calls callback on arrival; ♪/SFX mute buttons in top-right corner (CanvasLayer layer=60); buttons styled with 1px StyleBoxFlat border+padding, tint-colored border/text matching Main.modulate (updated each frame), white bg on hover, same minimum size via _equalize_button_sizes() (deferred); muted buttons dim to 35% modulate; enemy_doors in Y_SORT_GROUPS, _reset_room(), and _is_static_solid()
-  Player.gd                — Player movement and input; exports start_with_push, start_with_chain, save_system_enabled; calls SaveManager.on_player_ready() at end of _ready(); var speed_multiplier: float = 1.0 scales movement (set by TimedObject); active fan airflow applies +60px/s wind after movement; push requires holding against a block for PUSH_HOLD_TIME=0.15s before it fires (_push_charge_time/_push_charge_dir/_push_charge_block track the charge; resets if direction/block changes or player moves freely); cannot push non-fan blocks while standing in active fan airflow (fans remain pushable); debug ability shortcuts (room_teleport_enabled only): Shift+P=push, Shift+O=chain, Shift+I=break
+  Main.gd                  — Root scene controller; on _ready(): derives current_room from the player's actual scene position (not hardcoded to (0,0)) and sets camera + room_entry_positions accordingly; on room reset: plays character_death SFX; on prong spawn: plays plant_stake SFX; on room transition: plays music for new room anchor's music key, calls _clear_particles() on all fans in the room being left, resets all push_blocks in the destination room; on teleport: fades static in over 0.4s then teleports (plays electric_spawn) and instantly hides static; boss_spawned_enemies in current room are queue_freed instead of reset; skips splash screen when SaveManager.skip_splash is true; TAB label above player has black outline (outline_size=2); resets breakable_walls in current room on room reset; shoot_door_ball(from, to, callback) spawns a DoorBall node that flies to the door and calls callback on arrival; ♪/SFX mute buttons in top-right corner (CanvasLayer layer=60); buttons styled with 1px StyleBoxFlat border+padding, tint-colored border/text matching Main.modulate (updated each frame), white bg on hover, same minimum size via _equalize_button_sizes() (deferred); muted buttons dim to 35% modulate; enemy_doors in Y_SORT_GROUPS, _reset_room(), and _is_static_solid()
+  Player.gd                — Player movement and input; exports start_with_push, start_with_chain, start_with_break, save_system_enabled; all three start_with_* exports set to true in Main.tscn so the player begins the game with all abilities; calls SaveManager.on_player_ready() at end of _ready(); var speed_multiplier: float = 1.0 scales movement (set by TimedObject); active fan airflow applies +60px/s wind after movement; push requires holding against a block for PUSH_HOLD_TIME=0.15s before it fires (_push_charge_time/_push_charge_dir/_push_charge_block track the charge; resets if direction/block changes or player moves freely); cannot push non-fan blocks while standing in active fan airflow (fans remain pushable); debug ability shortcuts (room_teleport_enabled only): Shift+P=push, Shift+O=chain, Shift+I=break
   SaveManager.gd           — Autoload singleton; save/load system; autosaves every 5s to active slot; slot 1 selected by default; number-key input only active when Player.save_system_enabled=true: 1–9 selects+loads slot, Shift+1–9 deletes, Alt+1–9 selects without loading; save_system_enabled=false auto-activates slot 1 for autosave but never loads on start; reloads scene on load (skip_splash=true); tracks key_doors_opened, boss_doors_opened, boss_defeated, rooms_solved (Array of [rx,ry]), breakables_destroyed (Array of [gx,gy]) for permanently-freed/persistent nodes; notify_room_solved(room) also snapshots all currently-destroyed breakable walls in that room; is_room_solved()/is_breakable_destroyed() queried by Door and BreakableWall; on load: restores destroyed breakables silently and re-opens doors in solved rooms after beam sync; status label (top-left, fades after 1.5s) for slot feedback; save files at user://save_slot_N.json
   Prong.gd                 — Prong placement logic
   PushBlock.gd             — Push block with sprite-lag animation; pushes enemies on contact
-  Fan.gd                   — Pushable fan; groups "fans" + "push_blocks"; tile top-left grid_pos/start_grid_pos; sprite-lag push(); is_position_in_airflow() for wind LOS; dust particle emitter; _push_blocks_in_airflow() with 0.8s dwell + 0.8s push interval; reset() restores grid_pos and stops particles; _clear_particles() destroys and recreates the CPUParticles2D (called on room transition by Main)
+  Fan.gd                   — Pushable fan; groups "fans" + "push_blocks" + "nuts"; tile top-left grid_pos/start_grid_pos; sprite-lag push(); is_position_in_airflow() for wind LOS; get_beam_point() returns sprite center (enables beam chaining through fans); dust particle emitter — _clear_particles() destroys and recreates CPUParticles2D instantly (called on fan power-off and on room transition); _push_blocks_in_airflow() with 0.8s dwell + 0.8s push interval; reset() restores grid_pos and clears particles
   DustPile.gd              — Destructible dust pile; shakes then dissolves when fan airflow hits center; reset() skipped in solved rooms
   WindTurbine.gd           — Wind-powered switch; set_wind_power(id) when any active fan blows on it; yellow ring when powered; reset() clears power state
   ElectricBeam.gd          — Animated electricity beam (white, no transparency); calls AudioManager.start_beam_noise() on activate and stop_beam_noise() on deactivate
@@ -146,14 +147,16 @@ scripts/
   TeleportAnchor.gd        — Room teleport anchor markers (legacy fallback; TeleportPanel is now the primary teleport mechanic); @export var color: Color; @export var music: String = "" — valid keys: "Orange", "Yellow", "Blue", "Red", "Boss", "LevelEditor"; crossfades to the keyed track on room entry
   TeleportPanel.gd         — Interactive teleport panel; closed=solid (player pushes 0.2s to open); open=passable floor; screenshake on open; exports panel_name (shown on map) and one_way (excludes from destinations)
   OnewayPanel.gd           — (uses TeleportPanel.gd) TeleportPanel with one_way=true; source-only teleporter
-  AbilityPickup.gd         — Pickup that grants an ability and triggers the ability intro via AbilityTutorial; clears all prongs (with shrink animation) and deactivates beam before playing intro
+  PowerOrb.gd              — Ability unlock pickup; @export ability: String; group "power_orbs"; draws white filled circle (radius 10px) at (16,16) via _draw(); on collect: grants ability immediately, locks player, plays 3.5s animation — orb floats 34px upward over 3.0s while 8 tapered spike lines rotate slowly (TAU*0.2 rad/s, inner radius 14px, outer 38px, tip width 7px), then shrinks to zero while flying to player body center over 0.5s — on animation end calls PowerOrbCounter.add_orb() and unlocks player; reset() restores visibility
+  OrbDisplay.gd            — Floor indicator for PowerOrb collection count; group "orb_displays"; z_index=-10; draws at tile top-left, all visuals centered at (16,16); inner circle radius 8px (outline when unfilled, filled white when filled); filled = rank < PowerOrbCounter.count where rank is this node's index in all "orb_displays" sorted by position.y then position.x (topmost = index 0 fills first); outer pulsing ring (radius ≈11px, ±1px, one cycle/s via sin(time*TAU)) drawn only when filled; connects to PowerOrbCounter.count_changed signal for immediate redraw
+  PowerOrbCounter.gd       — Autoload singleton; var count: int; signal count_changed(new_count: int); add_orb() increments count and emits signal
   AbilityMessage.gd        — CanvasLayer message overlay (layer 25); prompt appears after 2s
   AbilityGate.gd           — Node2D that hides its sprite until required_ability is granted
   AbilityTutorial.gd       — Autoload singleton; plays per-ability intro animations (sphere arcs, block/panel highlights); inner class BoundingHighlight (group "break_highlight") draws a single pulsing rect around all breakable walls; inner class SphereOverlay draws arcing spheres
   Utils.gd                 — Autoload singleton; shared helpers — boss health bar HUD (top of screen) + per-enemy sprite health bars; remove_boss_health_bar uses untyped canvas var + erases dict entry before queue_free to avoid freed-instance crash on scene reload; shake_boss_health_bar() tweens canvas offset ±2px horizontally + random ±2px vertically (debounced); CPUParticles2D at fill tip bursts top-right on each shake; create/update/remove_sprite_health_bar() — 32px-wide, 6px-tall boss-style bar above sprite (offset_y=−10), z_index=−1 (draws behind enemy sprite), inherits Main.modulate from scene tree
   Enemy.gd                 — Enemy; walks toward player, blocked by walls/solids, instant beam kill via _handle_beam(), resets player on contact; _eject_from_solid() BFS-finds nearest free tile when inside a solid; @export var enemy_id: String = "" — used by EnemyDoor to track kills; is_dead() → bool public accessor
   WaterEnemy.gd            — Extends Enemy.gd; MAX_HP=25, hp var, sprite health bar via Utils; overrides _handle_beam() for −1 HP/frame + _trigger_shake(2.0); get_max_hp() overridable; freezes movement when not in current room or when map overlay is open; calls _eject_from_solid() each frame; boss_spawned flag auto-adds to "boss_spawned_enemies" group (deleted on room exit/reset instead of reset); overrides _die() to play water_death SFX; reset() restores hp
-  BounceEnemy.gd           — Extends WaterEnemy.gd; BOUNCE_MAX_HP=100; tile BFS pathfinding (walk + jump over 1-tile static walls); hop/jump movement on flat position with arc on sprite only; MOVE_SPEED=0.286; random wait 0.5–0.8s between bounces with landing squash (sin curve); stretch squash/stretch on hop/jump peaks; SPRITE_LAG_SPEED=24 (matches player); no _eject_from_solid; no wall AABB collision; z_index=64; player contact disabled during JUMP arc (wall jump); group "bounce_enemies"; overrides _handle_beam() — immune to electric beam, instead takes −1 HP/frame (+ 2px shake) while center is inside any active fan's airflow
+  BounceEnemy.gd           — Extends WaterEnemy.gd; BOUNCE_MAX_HP=50; tile A* pathfinding (Manhattan heuristic; walk + jump over 1-tile walls or push blocks via `is_blocked()`); pathfinding constrained to home room (computed from _start_pos in _ready: _room_x0/_room_y0); hop/jump movement on flat position with arc on sprite only; MOVE_SPEED=0.286; random wait 0.5–0.8s between bounces with landing squash (sin curve); idle rhythmic squish/squash (_idle_time accumulator, ~1.1 Hz, ±5%, bottom-center pivot); stretch squash/stretch on hop/jump peaks; SPRITE_LAG_SPEED=24 (matches player); no _eject_from_solid; no wall AABB collision; z_index=64; player contact disabled during JUMP arc (wall jump); group "bounce_enemies"; overrides _handle_beam() — immune to electric beam, instead takes −1 HP/frame (+ 2px shake) while center is inside any active fan's airflow
   WaterBoss.gd             — Extends WaterEnemy.gd; BOSS_MAX_HP=1000, 2× scale; overrides get_max_hp(); uses top-screen boss bar (not sprite bar); @export var debug_low_hp: bool sets HP to 10 at start if true; boss health bar via Utils (visible in boss home room when alive); takes 1 dmg/frame from beam (shake 1.0 + health bar shake+particles) + freeze-frame on first contact each exposure; teleports to random free tile (≥5 tiles from player, ≥2 tiles from room border) after 1.5s in beam; sprite slides to new position on teleport; speed scales with HP loss (BASE=40→MAX=100); spawns two WaterEnemy minions 3 tiles out below 80% HP with 0.7s scale-pulse telegraph (interval scales 4s→2s as HP drops, skips spawn if within 96px of player); charge attack: cooldown 3s, triggers when player within 5 tiles — 1s squash/stretch wind-up, then lunges at 240 px/s decelerating to normal speed; teleport mid-windup resets cooldown; phase 2 at 50% HP: screen shake + brief pause; death: series of 3 extreme shakes (0.5s apart), minion water_enemies in room deleted immediately (boss skips self in that loop), boss freezes 1s then arcs off screen in a parabola at z_index=100 with a slight rotation (dir * p * 0.8 rad) — doors open and particles fire once boss exits room bounds; sprite lag at half enemy speed (BOSS_SPRITE_SPEED=10); no modulation effects
   BounceBoss.gd            — Extends WaterEnemy.gd; BOSS_MAX_HP=5, 2× scale (64×64); tile BFS pathfinding with 2×2 walkability checks; hop movement (HOP_DURATION=0.28s) + big bounce attack (5s interval, 0.8s windup, locks target at jump start, tall arc, can't hurt player mid-air); speed scales with HP loss (BASE=0.30→MAX=0.75 move speed multiplier); below 80% HP: wobble telegraph (1s) then spawns BounceEnemies in 3 of 4 random cardinal directions at 96px from player (skips if tile solid); NO beam damage — instead two BounceBossPanel nodes (positive + negative) are spawned in the room at random positions ≥96px from borders when boss registers; when beam passes through BOTH panels simultaneously a stake sprite falls from the top of the screen onto the boss (0.45s tween) dealing 1 damage; panels relocate immediately when object is launched; only one object can fall at a time; on death: clears boss-spawned bounce enemies, arc parabola off screen, opens boss doors; panels hidden when boss is dead or player leaves the room
   BounceBossPanel.gd       — Node2D spawned by BounceBoss; positive/negative variants (positive.png / negative.png, drawn via _draw()); activated (_active=true) when the electric beam passes through the panel center (beam.is_point_on_beam(center, 16px)); draws a white arc outline when active; no GameManager registration; visibility controlled by BounceBoss._process each frame
@@ -327,7 +330,7 @@ Sounds/
 
 **Movement (AABB collision):** Root `position` is hitbox bottom. `_hitbox_rect(pos)` = `pos + _body_offset + _hitbox_offset`. Axis-separated movement against `Main.get_player_blocking_rects()`. Pass blocks are not solids. After player input movement, active fan airflow (`is_position_in_airflow(get_body_center())`) applies an additional axis-separated wind displacement at `WIND_FORCE` px/s.
 
-**Push detection:** After movement; single cardinal input; flush against push-block face. Closest block by `_sprite_center()`. On success: `block.push(dir)`, shake (0.8), `PUSH_FREEZE` axis lock. Push is **gated** by `GameManager.has_ability("push")` — no pushing until that ability is acquired. While `_is_in_fan_airflow()` is true, push charge is blocked for all blocks **except** nodes in the `"fans"` group (fans remain pushable in wind).
+**Push detection:** After movement; single cardinal input; flush against push-block face. Closest block by `_sprite_center()`. On success: `block.push(dir)`, shake (0.8), `PUSH_FREEZE` axis lock. Push is **gated** by `GameManager.has_ability("push")` — no pushing until that ability is acquired. While in active fan airflow, pushing non-fan blocks directly **against** the wind direction is blocked; pushing with or across the wind (and pushing fans) is always allowed. `_get_fan_airflow_direction()` returns the wind `Vector2i` (or `Vector2i.ZERO` if not in airflow).
 
 **Startup ability grants:** `@export var start_with_push: bool` and `@export var start_with_chain: bool` — if true, the corresponding ability is granted via `GameManager.grant_ability()` in `_ready()` without requiring a pickup.
 
@@ -335,7 +338,7 @@ Sounds/
 
 **Key variables:** `speed_multiplier: float = 1.0` — scales movement velocity; set to `0.8` by TimedObject while it is visible, restored to `1.0` when it hides. `_push_charge_time`, `_push_charge_dir`, `_push_charge_block` — track how long the player has held against a specific block; charge resets if direction/block changes or player moves freely; push fires only after `PUSH_HOLD_TIME=0.15s`. `_facing: String` — current facing direction (`"front"`, `"back"`, `"side"`). `_facing_right: bool` — whether side-facing is right (false = flip_h).
 
-**Key functions:** `get_body_center()` → hitbox center world pos; `_hitbox_rect(pos)`, `_sprite_center()` (hardcoded +Vector2(16,16) for 32×32 frame), `_grid_to_world()` / `_world_to_grid()`, `reset_to(gp)`, `_try_push()`, `_is_in_fan_airflow()`, `_start_push_lock(dir)`, `eject_from_solid()` — BFS from current grid pos to nearest free tile; called every frame in `_process` and at end of `reset_to`; `play_teleport(reverse: bool = false)` — plays `"teleport"` animation (or `play_backwards` at `speed_scale=0.5` when `reverse=true`), awaits `animation_finished`, restores idle; used by `Main._complete_teleport()`
+**Key functions:** `get_body_center()` → hitbox center world pos; `_hitbox_rect(pos)`, `_sprite_center()` (hardcoded +Vector2(16,16) for 32×32 frame), `_grid_to_world()` / `_world_to_grid()`, `reset_to(gp)`, `_try_push()`, `_is_in_fan_airflow()`, `_get_fan_airflow_direction()` → `Vector2i`, `_start_push_lock(dir)`, `eject_from_solid()` — BFS from current grid pos to nearest free tile; called every frame in `_process` and at end of `reset_to`; `play_teleport(reverse: bool = false)` — plays `"teleport"` animation (or `play_backwards` at `speed_scale=0.5` when `reverse=true`), awaits `animation_finished`, restores idle; used by `Main._complete_teleport()`
 
 **References `Main` via `get_tree().current_scene`** (not `get_parent()`), because the player is reparented under `Walls` at runtime.
 
@@ -379,7 +382,7 @@ Sounds/
 ### Fan.gd (Node2D)
 **Purpose:** Directional fan switch + pushable block. Turns on/off via `GameManager.doors_update` like a door. Blows wind, shows dust particles, and pushes other push blocks in its airflow.
 
-**Groups:** `"fans"`, `"push_blocks"`
+**Groups:** `"fans"`, `"push_blocks"`, `"nuts"` (beam chains through fans when chain ability is active, same as Nut/Screw)
 
 **Constants:** `PUSH_INTERVAL=0.8`, `SLIDE_DURATION=0.15`, `PARTICLE_Z_INDEX=10`, `AIRFLOW_HALF_BAND=16` (32px tile band), `PARTICLE_SPEED_MIN=40`, `PARTICLE_SPEED_MAX=65`
 
@@ -387,11 +390,11 @@ Sounds/
 
 **Airflow:** `is_position_in_airflow(world_pos)` — same row/column LOS from fan tile; passes through solids; ends at room boundary. `is_active()` reflects door id state.
 
-**Particles:** Persistent `CPUParticles2D` child of `Sprite2D` at runtime. `local_coords=true` so particles ride the sprite during push slide. `z_as_relative=false`, `z_index=10` (above walls). `color=Color.WHITE` (inherits `Main.modulate`). Opaque, no alpha fade. Rectangle emission along airflow corridor. `_stop_particles()` sets `emitting=false` when fan off; emitter is not destroyed. Particle config skipped while `_sliding`.
+**Particles:** Persistent `CPUParticles2D` child of `Sprite2D` at runtime. `local_coords=true` so particles ride the sprite during push slide. `z_as_relative=false`, `z_index=10` (above walls). `color=Color.WHITE` (inherits `Main.modulate`). Opaque, no alpha fade. Rectangle emission along airflow corridor. When fan turns off, `_clear_particles()` is called (destroys and recreates the node) so all in-flight particles vanish instantly. Particle config skipped while `_sliding`.
 
 **Airflow push:** `_push_blocks_in_airflow()` — tracks blocks continuously in stream via `_blocks_in_airflow`; first push allowed after `PUSH_INTERVAL` dwell; subsequent pushes gated by static `_block_last_pushed` per instance id.
 
-**Key functions:** `reset()` — restores `grid_pos`, kills slide tween, stops particles; `get_grid_pos()`, `is_active()`, `is_position_in_airflow()`, `push(dir)`
+**Key functions:** `reset()` — restores `grid_pos`, kills slide tween, clears particles; `get_grid_pos()`, `is_active()`, `is_position_in_airflow()`, `push(dir)`, `get_beam_point()` → sprite center (used by beam path builder)
 
 ---
 
@@ -513,13 +516,33 @@ Sounds/
 
 ---
 
-### AbilityPickup.gd (Node2D)
-- Group `"ability_pickups"`; positioned at tile top-left like other collectibles
+### PowerOrb.gd (Node2D)
+- Group `"power_orbs"`; positioned at tile top-left like other collectibles
 - `@export var ability: String` — ability name to grant (e.g. `"push"`)
-- `@export var message: String` — text shown in the message overlay on collect (used for non-push abilities)
 - Draws a white filled circle (radius 10px) at `(16, 16)` via `_draw()`; hidden after collect
-- On collect: grants ability via `GameManager.grant_ability()`, sets `room_entry_positions[current_room]` to player's grid pos, locks player, calls `AbilityTutorial.play_intro(ability, player, main)`
+- On collect: grants ability immediately via `GameManager.grant_ability()`, clears all prongs, sets `room_entry_positions[current_room]` to player's grid pos, locks player, starts animation
+- **Animation (3.5s total):**
+  - Phase 1 (0–3.0s): orb floats 34px upward; 8 tapered spike lines rotate at `TAU * 0.2` rad/s — each is a filled triangle, point at inner radius 14px, base width 7px at outer radius 38px
+  - Phase 2 (3.0–3.5s): spike lines hidden; orb radius shrinks to 0 while position lerps to player body center
+  - On finish: calls `PowerOrbCounter.add_orb()`, unlocks player
 - `reset()` — re-shows pickup (does not revoke ability)
+
+---
+
+### PowerOrbCounter.gd (autoload singleton, Node)
+- `var count: int` — number of PowerOrbs collected this session
+- `signal count_changed(new_count: int)` — emitted by `add_orb()`
+- `add_orb()` — increments `count` and emits `count_changed`
+
+---
+
+### OrbDisplay.gd (Node2D)
+- Group `"orb_displays"`; positioned at tile top-left; `z_index = -10`; NOT in `Y_SORT_GROUPS` (floor decoration, no depth sort needed)
+- No sprite child; all drawing via `_draw()`
+- **Inner circle:** radius 8px at tile center `(16, 16)`; drawn filled white when this slot is filled, outline-only otherwise
+- **Outer pulsing ring:** radius `11 + sin(time * TAU)` px (±1px, one cycle/s); drawn only when slot is filled
+- **Filled determination:** slot is filled when `_get_rank() < PowerOrbCounter.count`; rank = index of this node in all `"orb_displays"` group nodes sorted by `position.y` ascending then `position.x` ascending (topmost object = rank 0, fills first)
+- Connects to `PowerOrbCounter.count_changed` signal at `_ready()` for immediate redraw on orb collection
 
 ---
 
@@ -652,9 +675,9 @@ Sounds/
 - **Shift+1–9**: delete that slot's save file; deactivates slot if it was active
 - **Alt+1–9**: select slot without loading (even if a save file exists)
 
-**Save data (JSON at `user://save_slot_N.json`):** player world position, current room, abilities dict, push block/nut grid positions (keyed by `start_grid_pos`), collected keys (by `start_grid_pos`), opened KeyDoors, open TeleportPanels, removed BossDoors, boss defeated flag, enemy positions + dead flags, map visited rooms.
+**Save data (JSON at `user://save_slot_N.json`):** player world position, current room, abilities dict, push block/nut grid positions (keyed by `start_grid_pos`), collected keys (by `start_grid_pos`), opened KeyDoors, open TeleportPanels, removed BossDoors, boss defeated flag, enemy positions + dead flags, map visited rooms. `save_quicksave()` writes the same data structure to `user://quicksave.json`. The shared data-building logic lives in `_build_save_data() -> Dictionary`; both `save()` and `save_quicksave()` call it. `_apply_load` guards `_tween` and `sprite` accesses on push_blocks group members with `get()` to safely skip Fan nodes (which are in `"push_blocks"` but lack these properties).
 
-**Load flow:** `load_slot()` → `GameManager.clear_scene_state()` + `reload_current_scene()` → `_process()` detects new scene is ready → `call_deferred("_apply_load", data)` → restores all state silently (no animations/shakes) → calls `Main._update_beam()`.
+**Load flow:** `load_slot()` → `GameManager.clear_scene_state()` + `reload_current_scene()` → `_process()` detects new scene is ready → `call_deferred("_apply_load", data)` → restores all state silently (no animations/shakes) → calls `Main._update_beam()`. After restoring `player.position`, `_apply_load` immediately syncs `player.visual_pos` so the sprite appears at the correct position rather than lerping from the scene default. `load_quicksave()` uses the same deferred-apply flow but calls `change_scene_to_file("res://scenes/Main.tscn")` instead of reloading, so it works correctly when called from the LevelEditor.
 
 **Auto-slot mode** (`Player.save_system_enabled = false`): `on_player_ready(false)` activates slot 1 for autosaving but does not load any save file — game starts from the scene's default state. Number-key input is disabled. Manual mode (`Player.save_system_enabled = true`): slot 1 is pre-selected by default; user can switch/load/delete slots with number keys.
 
@@ -750,7 +773,7 @@ Sounds/
 
 ### Overview
 
-Opened from Main.tscn by pressing **K+C simultaneously** (no other keys held) via `_unhandled_input` in `Main.gd`, which calls `get_tree().change_scene_to_file("res://scenes/LevelEditor.tscn")`. The editor is a fully standalone scene — it does not use Main.gd at all. Returning to the game requires a scene change from outside (no built-in exit button).
+Opened from Main.tscn by pressing **K+C simultaneously** (no other keys held) via `_unhandled_input` in `Main.gd`. Before switching scenes, `SaveManager.save_quicksave()` writes current game state to `user://quicksave.json`. The editor is a fully standalone scene — it does not use Main.gd at all. The **Exit button** in the TopBar calls `SaveManager.load_quicksave()`, which reads the quicksave file, sets `_pending_data`, and calls `change_scene_to_file("res://scenes/Main.tscn")` — `SaveManager._process()` then applies the state once Main is ready (same deferred-apply flow as a normal slot load).
 
 ### Scene: `scenes/LevelEditor.tscn`
 
@@ -765,7 +788,7 @@ LevelEditor [Node2D, LevelEditor.gd]
 │   │   ├── GhostSprite [Sprite2D, visible=false, z_index=20, centered=false — placement preview]
 │   │   └── PlayerMarker [Sprite2D, visible=false, z_index=15, centered=false — spawn position marker]
 └── EditorUI [CanvasLayer, layer=10]
-    ├── TopBar [HBoxContainer — SaveButton, LoadButton]
+    ├── TopBar [HBoxContainer — ExitButton, SaveButton, LoadButton, ExportButton, ImportButton; visible only in BUILD mode and hidden in wire mode and play mode]
     ├── Palette [PanelContainer, anchored bottom-center, 22 columns, 2 rows tall]
     │   └── List [GridContainer, columns=22]
     ├── PropertiesPanel [PanelContainer, right side, visible=false]
@@ -785,7 +808,7 @@ LevelEditor [Node2D, LevelEditor.gd]
 - `WALL_SOURCE_ID=1` — source ID for wall tiles in `TileSet_editor`
 - `PLAY_COLS=24`, `PLAY_ROWS=11` — safe interior area (excludes border row/col)
 
-**Modes:** `Mode.BUILD` (palette visible, click to select/inspect objects) and `Mode.PLACING` (hint visible, click/drag to place or delete the selected type). Space/Escape returns to BUILD.
+**Modes:** `Mode.BUILD` (palette visible, click to select/inspect objects), `Mode.PLACING` (hint visible, click/drag to place or delete the selected type; Space/Escape returns to BUILD), and `Mode.PLAY` (play-test mode; see Play Mode below). **Wire mode** (`_wire_mode: bool`) is a Boolean overlay on top of BUILD mode that hides the palette and lets the user assign color-coded IDs to ID-capable objects; toggled with E (Escape also exits); Space cycles the active color.
 
 **Palette types (22-column grid):**
 `Floor`, `Wall`, `Player`, then all SCENE_MAP keys in order: `PushBlock`, `Nut`, `Screw`, `PassBlock`, `LightningBlocker`, `Door`, `FloorPanel`, `FloorPanelNeg`, `KeyDoor`, `Key`, `FanRight`, `FanLeft`, `FanUp`, `FanDown`, `WindTurbine`, `WindBlock`, `DustPile`, `BreakableWall`, `KeyBreakableWall` (immediately after BreakableWall), `WaterEnemy`, `BounceEnemy`.
@@ -797,7 +820,7 @@ LevelEditor [Node2D, LevelEditor.gd]
 - **Player** — places/moves a `PlayerMarker` Sprite2D (not an actual Player scene); records `player_spawn_pos: Vector2i`.
 - **KeyBreakableWall** — palette-only convenience type; `_place_object("KeyBreakableWall", gp)` calls `_place_object("BreakableWall", gp)` then `_place_object("Key", gp)` in sequence, reusing the Key-on-BreakableWall stacking logic.
 - **FloorPanelNeg** — instantiates FloorPanel.tscn and sets `positive = false`.
-- **KeyDoor** — after `add_child`, `_keys_total` is set to 1 so `_count_keys()` (deferred) never auto-opens the door when there are no keys in the editor.
+- **KeyDoor** — after `add_child`, `_keys_total` is set to 1 so `_count_keys()` (deferred) never auto-opens the door when there are no keys in the editor. In play mode, `_keys_total` is reset to 0 and `_count_keys()` is re-triggered so the door behaves correctly (opens immediately if no keys, waits for collection otherwise).
 - **Key on BreakableWall** — only legal stacking: `_place_object` allows Key placement when existing object is BreakableWall. Key gets `modulate.a=0.5` and `z_index=5` **after** `add_child` (Key._ready() resets z_index to -5, so pre-add assignment is overridden).
 
 **Data model:**
@@ -814,31 +837,67 @@ LevelEditor [Node2D, LevelEditor.gd]
 
 **Properties panel:** Opens in BUILD mode when clicking a placed object. Shows type label and editable fields for `id`, `id2`, `positive` (via LineEdit / CheckBox widgets).
 
-**Player compatibility stubs** (allow placed object scripts to call main-scene methods without crashing):
+**Player compatibility stubs / interface** (allow placed object scripts to call main-scene methods without crashing, and support full play mode):
 - `shoot_door_ball(_from, _to, callback)` — immediately calls `callback.call()` (no ball animation)
-- `player: Node2D` — returns `_stub_player` (inner class `_PlayerStub extends Node2D` with `get_body_center()→Vector2.ZERO`, `unlock_movement()`, `lock_movement()`)
+- `player: Node2D` — returns `_play_player` when in play mode, otherwise `_stub_player` (inner class `_PlayerStub extends Node2D` with `get_body_center()→Vector2.ZERO`, `unlock_movement()`, `lock_movement()`)
+- `electric_beam: Node` — returns `_play_beam` (used by BreakableWall.gd to check beam contact)
 - `check_room_transition(...)`, `_trigger_shake(...)` — no-ops
 - `get_player_blocking_rects(area)`, `can_push_block_to(gp)`, `get_push_block_at(gp)`, `get_push_block_at_face(...)` — functional stubs querying push_blocks group
-- `_is_static_solid(gp)` — checks both `walls_tilemap` and `border_walls_tilemap`
+- `has_pass_block_at(gp)`, `is_blocked(gp)` — functional stubs (pass_blocks group; static solids + push blocks)
+- `_is_static_solid(gp)` — checks `walls_tilemap`, `border_walls_tilemap`, and all game-object groups (doors, key_doors, lightning_blockers, screws, breakable_walls, dust_piles, wind_turbines, enemy_doors) so player collision is correct in play mode
 - `current_room: Vector2i = Vector2i(0, 0)`
 
-**Save/Load:**
-- **Desktop**: Save prompts filename via `AcceptDialog`, writes JSON to `user://levels/<name>.json`. Load opens `FileDialog` (ACCESS_USERDATA) pointing at `user://levels/`.
+**Bottom-right label** (added programmatically to EditorUI CanvasLayer, right-anchored):
+- Edit mode (BUILD/PLACING): `"E: Wire    Q: Play"`
+- Wire mode active: `"E: Edit    Q: Play"`
+- Play mode: `"Q: Edit"`
+
+**Play Mode:**
+- **Entering play mode (Q in BUILD, PLACING, or Wire mode):**
+  1. Level data captured in memory (`_play_auto_save_data`) and silently written to `user://levels/auto_save.json` (desktop only).
+  2. All placed objects reset via `_restore_objects()`.
+  3. Wire IDs applied: for each node in `_wire_assignments`, `node.id = "id" + str(color_index + 1)`.
+  4. `GameManager.floor_panels` rebuilt by re-calling `register_floor_panel` for every floor panel (since their `_ready()` registered with empty IDs at placement time).
+  5. `GameManager.doors` rebuilt by clearing and re-registering all doors and fans with their new IDs (same reason — `_ready()` registered with empty IDs).
+  6. `ElectricBeam.tscn` instantiated and added as child of LevelEditor.
+  7. `Player.tscn` instantiated (`start_with_push=true`, `start_with_chain=true`, `save_system_enabled=false`), added to `YSortRoot`, teleported to `player_spawn_pos` (fallback tile 2,2). `GameManager.grant_ability("break")` called.
+  8. `PlayerMarker` hidden. All `key_doors` have `_keys_total` reset to 0 and `_count_keys()` called deferred.
+  9. Editor UI (palette, props panel, placing hint, ghost, wire overlay) hidden. Mouse input blocked in PLAY (`_unhandled_input` returns early). Wire mode flag cleared.
+- **In play mode:** Space places prongs. Electric beam uses full nut-chaining and blocker logic (same functions as Main.gd). R resets the room (no CRT effect).
+- **Exiting play mode (Q):**
+  1. Prongs cleared from GameManager and freed. Player and beam freed.
+  2. `GameManager.clear_scene_state()` called.
+  3. Level restored from `_play_auto_save_data` via `_apply_level_data()` — wire assignments rebuilt from position data, no "Loaded!" toast.
+  4. `PlayerMarker` visibility restored. Editor returns to BUILD mode.
+
+**Wire mode** (`_wire_mode: bool`):
+- **Toggle:** E key (BUILD or PLACING mode); Escape also exits wire mode.
+- **On enter:** calls `_set_mode(BUILD)` first (restores objects), then hides `top_bar` and palette, shows placing hint `"Space: Cycle Color"`, sets label to `"E: Edit    Q: Play"`.
+- **On exit:** `_set_mode(BUILD)` restores the palette and label.
+- **Space:** cycles `_wire_color_index` through `_get_available_color_indices()` — sorted list of all currently-used color indices plus the next unused one.
+- **Left-click** on an object with an `id` field: assigns current color index to `_wire_assignments[node]`. **Right-click** removes assignment.
+- **Colors:** `WIRE_BASE_COLORS = [BLUE, RED, GREEN, YELLOW]` for indices 0–3 → `id1`–`id4`. Further indices use a seeded RNG (`seed = (idx+1)*7919`) for deterministic colors.
+- **Visuals (drawn on `grid_overlay` via `_draw_wire_overlay()`):**
+  - Dotted lines (`draw_dashed_line`, width=1.5, dash=6) connect all objects of the same color in their wire color. Path order is determined by `_wire_nearest_neighbor()` which sorts points by x then y — this guarantees no crossing lines within a color group.
+  - A colored dot (6px black outline, 6px fill) is drawn at each wired object's tile center, on top of lines.
+  - A smaller cursor dot (6px black, 4.5px fill) follows the mouse grid tile. Hidden in play mode.
+- **On play enter:** `node.id = "id" + str(color_index + 1)` applied to all assigned nodes, then `GameManager.floor_panels` and `GameManager.doors` are rebuilt (see Play Mode step 4–5 above).
+- **Save/load:** `_wire_assignments` serialized as `wire_assignments: {"col,row": color_index}` in the level JSON. Restored in `_apply_level_data()` by matching position to placed objects with `id` fields. Deleted objects have their assignment removed via `_delete_object()`.
+
+**Save/Load/Export/Import:**
+- **Save (desktop)**: prompts filename via `AcceptDialog` (label has black outline), writes JSON to `user://levels/<name>.json`. **Load (desktop)**: opens `FileDialog` (ACCESS_USERDATA) pointing at `user://levels/`.
 - **Web** (`OS.get_name() == "Web"`): Save triggers a browser file download via JS `Blob` + anchor-click (`_web_download`). Load opens a JS `<input type="file">` picker; the selected file is read by `FileReader` and stored in `window._godotUploadContent`; `_process` polls this variable each frame and calls `_apply_level_data` when content arrives.
-- JSON format: `{player_spawn:{col,row}, walls:[{col,row,source_id,atlas_x,atlas_y}], floor:[{col,row}], objects:[{type,col,row,id?,id2?,positive?}]}`
+- **Export**: on desktop, saves to `user://levels/export.json`; on all platforms, encodes the level as a compact string (`JSON → UTF-8 bytes → DEFLATE compress → base64` via `Marshalls.raw_to_base64`) and displays it in a selectable `TextEdit` dialog (pre-selected, black-outlined label). The encoded string is platform-agnostic and can be shared and pasted into Import on any build.
+- **Import**: shows a `TextEdit` paste dialog (black-outlined label); on confirm, decodes the string (`base64 → DEFLATE decompress via decompress_dynamic(-1, …) → JSON`) and calls `_apply_level_data`. Shows "Invalid export code!" toast on decode failure. Works on web and desktop (pure Godot UI, no filesystem).
+- All dialog labels are created via `_make_dialog_label(text)` which applies `outline_size=4` and `font_outline_color=BLACK`.
+- JSON format: `{player_spawn:{col,row}, walls:[{col,row,source_id,atlas_x,atlas_y}], floor:[{col,row}], objects:[{type,col,row,id?,id2?,positive?}], wire_assignments:{"col,row":color_index}}`
 - On load, Key-on-BreakableWall visuals (`modulate.a=0.5`, `z_index=5`) are restored after all objects are added to the scene tree.
 
 **Room reset / restore:** `_restore_objects()` called when returning to BUILD mode — calls `reset()` on placed objects that have it, or snaps position back to grid. Re-applies Key transparency for stacked keys.
 
-### Key hotkey in Main.gd
+### K+C hotkey in Main.gd
 
-```gdscript
-# In Main._unhandled_input():
-if event is InputEventKey and event.pressed and not event.echo:
-    var k = Input.get_keyboard_state_for(...)  # effectively:
-    if Input.is_key_pressed(KEY_K) and Input.is_key_pressed(KEY_C) and [no other keys]:
-        get_tree().change_scene_to_file("res://scenes/LevelEditor.tscn")
-```
+`Main._unhandled_input()` detects K+C held simultaneously with no other movement/action keys. It calls `SaveManager.save_quicksave()` first, then `get_tree().change_scene_to_file("res://scenes/LevelEditor.tscn")`.
 
 ### SaveManager guard
 
@@ -906,8 +965,11 @@ PassBlock.tscn:
   Node2D [PassBlock.gd]
   └── Sprite2D [switch_open2.png, centered=false]
 
-AbilityPickup.tscn:
-  Node2D [AbilityPickup.gd]  ← no sprite child; circle drawn via _draw()
+PowerOrb.tscn:
+  Node2D [PowerOrb.gd]  ← no sprite child; circle + spike lines drawn via _draw()
+
+OrbDisplay.tscn:
+  Node2D [OrbDisplay.gd, z_index=-10]  ← no sprite child; circles drawn via _draw()
 
 AbilityGate.tscn:
   Node2D [AbilityGate.gd]
@@ -985,9 +1047,12 @@ LevelEditor.tscn:
   │   │   └── PlayerMarker [Sprite2D, visible=false, z_index=15, centered=false]
   ├── GridOverlay [Node2D, z_index=9 — draws grid lines via draw.connect]
   └── EditorUI [CanvasLayer, layer=10]
-      ├── TopBar [HBoxContainer, full-width anchor]
+      ├── TopBar [HBoxContainer, full-width anchor — visible only in BUILD mode]
+      │   ├── ExitButton [Button — returns to Main.tscn via SaveManager.load_quicksave()]
       │   ├── SaveButton [Button]
-      │   └── LoadButton [Button]
+      │   ├── LoadButton [Button]
+      │   ├── ExportButton [Button]
+      │   └── ImportButton [Button]
       ├── Palette [PanelContainer, bottom-center anchor, ±360px, height 80px]
       │   └── List [GridContainer, columns=22]
       ├── PropertiesPanel [PanelContainer, right anchor, visible=false]
@@ -1015,7 +1080,8 @@ All objects use `centered = false`.
 | Key | AnimatedSprite2D (Key_File.webp idle, Vanish.webp on collect) | tile top-left |
 | PassBlock | switch_open2.png | tile top-left |
 | BreakableWall | wall_breakable.png | tile top-left |
-| AbilityPickup | (drawn via _draw) | tile top-left |
+| PowerOrb | (drawn via _draw) | tile top-left |
+| OrbDisplay | (drawn via _draw) | tile top-left |
 | AbilityGate | TAB.png | tile top-left |
 | Enemy | Front_Idle1.png | tile top-left (moves continuously) |
 | WaterEnemy / BounceEnemy / WaterBoss | Front_Idle1.png | tile top-left (moves continuously) |
@@ -1076,7 +1142,7 @@ Enemy enters beam:
 ## Camera System
 
 - One room fills the 800×384 viewport
-- `Camera2D` initialized to `_room_center(0,0)` in `_ready()`
+- `Camera2D` initialized to the room the player starts in (`_room_center(current_room)`) in `_ready()`; `current_room` is derived from the player's scene position, not hardcoded to `(0,0)`
 - **Shake:** decays via `lerpf(..., 0, 20*delta)`; triggered on prong events (5–6 strength), door open (5), block push (0.8)
 - **Room transition:** 0.25s tween on `Camera2D.position` (EASE_IN_OUT SINE)
 - `CAMERA_MARGIN` of `(16, 16)` added to all room center calculations
@@ -1121,7 +1187,7 @@ Enemy enters beam:
 | Splash screen on launch | SplashScreen.gd |
 | Map overlay slides in/out from top (0.15s SINE) | MapOverlay.gd `_open_map()` / `_close_map()` |
 | Floor panel pulsing border highlight (chain tutorial) | FloorPanel.gd `set_highlight()` |
-| Ability intro sphere arcs (push → blocks, chain → panels, break → breakable walls) | AbilityTutorial.gd |
+| PowerOrb pickup: float + rotating spike lines → shrink + fly to player | PowerOrb.gd `_update_animation()` |
 | Break ability: bounding highlight rect around all breakable walls until first break | AbilityTutorial.gd `BoundingHighlight`, BreakableWall.gd |
 | Breakable wall shake + particle burst on beam contact | BreakableWall.gd `_explode()` |
 | Boss health bar HUD (top of screen, room-tinted) | Utils.gd `create/update_boss_health_bar()`; WaterBoss.gd |
