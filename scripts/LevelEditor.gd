@@ -38,6 +38,7 @@ const SCENE_MAP = {
 	"BreakableWall":    "res://scenes/objects/BreakableWall.tscn",
 	"WaterEnemy":       "res://scenes/enemies/WaterEnemy.tscn",
 	"BounceEnemy":      "res://scenes/enemies/BounceEnemy.tscn",
+	"SpiderEnemy":      "res://scenes/enemies/SpiderEnemy.tscn",
 }
 
 const PALETTE_SPRITES = {
@@ -65,6 +66,7 @@ const PALETTE_SPRITES = {
 	"KeyBreakableWall": "res://Sprites/objects/wall_breakable.png",
 	"WaterEnemy":       "res://Sprites/enemies/Front_Idle1.png",
 	"BounceEnemy":      "res://Sprites/enemies/Front_Idle1.png",
+	"SpiderEnemy":      "res://Sprites/enemies/Front_Idle1.png",
 }
 
 # ──────────────────────────────────────────────

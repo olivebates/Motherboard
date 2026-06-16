@@ -185,6 +185,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("place_prong"):
 		_main.spawn_prong(get_body_center())
+	if event.is_action_pressed("prong_teleport"):
+		_try_prong_teleport()
 	if room_teleport_enabled and event is InputEventKey and event.pressed and not event.echo:
 		var shift = event.shift_pressed
 		if shift:
@@ -205,6 +207,19 @@ func _unhandled_input(event: InputEvent) -> void:
 				GameManager.grant_ability("break")
 			if dir != Vector2i.ZERO:
 				_try_room_teleport(dir)
+
+func _try_prong_teleport() -> bool:
+	var prongs = get_tree().get_nodes_in_group("prongs")
+	if prongs.size() != 2:
+		return false
+	var my_center = get_body_center()
+	for i in range(2):
+		var prong_center = prongs[i].global_position + prongs[i]._body_offset + prongs[i]._hitbox_offset
+		if my_center.distance_to(prong_center) < 24.0:
+			var other_center = prongs[1 - i].global_position + prongs[1 - i]._body_offset + prongs[1 - i]._hitbox_offset
+			_main.teleport_between_prongs(other_center)
+			return true
+	return false
 
 func _try_room_teleport(dir: Vector2i) -> void:
 	var target_room = _main.current_room + dir
@@ -444,6 +459,39 @@ func _is_inside_solid() -> bool:
 		if rect.intersects(solid):
 			return true
 	return false
+
+func move_to_center(world_center: Vector2) -> void:
+	position = YSortHitboxBottom.root_pos_from_hitbox_center(world_center, _body_offset, _hitbox_offset)
+	visual_pos = position + _body_offset
+	_eject_from_solid_fine()
+
+func _eject_from_solid_fine() -> void:
+	if not _is_inside_solid():
+		return
+	const STEP = 4
+	var ox = int(round(position.x / STEP)) * STEP
+	var oy = int(round(position.y / STEP)) * STEP
+	var origin = Vector2i(ox / STEP, oy / STEP)
+	var visited = { origin: true }
+	var queue: Array[Vector2i] = [origin]
+	while queue.size() > 0:
+		var gp: Vector2i = queue.pop_front()
+		var candidate = Vector2(gp.x * STEP, gp.y * STEP)
+		var rect = _hitbox_rect(candidate)
+		var blocked = false
+		for solid in _main.get_player_blocking_rects(rect):
+			if rect.intersects(solid):
+				blocked = true
+				break
+		if not blocked:
+			position = candidate
+			visual_pos = position + _body_offset
+			return
+		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var next = gp + d
+			if not visited.has(next):
+				visited[next] = true
+				queue.append(next)
 
 func push_out(displacement: Vector2) -> void:
 	position += displacement

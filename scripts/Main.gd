@@ -672,6 +672,14 @@ func _complete_teleport(room: Vector2i) -> void:
 	await player.play_teleport(true)
 	player.unlock_movement()
 
+func teleport_between_prongs(target_center: Vector2) -> void:
+	player.lock_movement()
+	await player.play_teleport()
+	AudioManager.play_sfx("electric_spawn")
+	player.move_to_center(target_center)
+	await player.play_teleport(true)
+	player.unlock_movement()
+
 func _find_nearest_open_tile(start: Vector2i) -> Vector2i:
 	var visited := { start: true }
 	var queue: Array[Vector2i] = [start]

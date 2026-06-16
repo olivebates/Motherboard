@@ -1,4 +1,4 @@
-[gd_scene load_steps=3 format=3 uid="uid://b4oneway1tscn"]
+[gd_scene load_steps=3 format=3 uid="uid://dgpjt552q2s3b"]
 
 [ext_resource type="Script" uid="uid://dhtlfar3mkje4" path="res://scripts/TeleportPanel.gd" id="1_tpscript"]
 [ext_resource type="Texture2D" uid="uid://cwn2fl3n56lng" path="res://Sprites/objects/teleport_closed.png" id="2_f45vj"]
@@ -8,5 +8,6 @@ script = ExtResource("1_tpscript")
 one_way = true
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
+z_index = -10
 position = Vector2(16, 16)
 texture = ExtResource("2_f45vj")
