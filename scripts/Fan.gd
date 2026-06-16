@@ -69,6 +69,21 @@ func push(dir: Vector2i) -> void:
 	_slide_tween.tween_property(sprite, "position", Vector2.ZERO, SLIDE_DURATION)
 	_slide_tween.tween_callback(func(): _sliding = false)
 
+func push_undo(old_pos: Vector2i) -> void:
+	var cur_world := Vector2(grid_pos.x * TILE_SIZE, grid_pos.y * TILE_SIZE)
+	grid_pos = old_pos
+	var old_world := Vector2(old_pos.x * TILE_SIZE, old_pos.y * TILE_SIZE)
+	position = old_world
+	sprite.position = cur_world - old_world
+	if _slide_tween:
+		_slide_tween.kill()
+	_slide_tween = create_tween()
+	_slide_tween.set_ease(Tween.EASE_OUT)
+	_slide_tween.set_trans(Tween.TRANS_SINE)
+	_sliding = true
+	_slide_tween.tween_property(sprite, "position", Vector2.ZERO, SLIDE_DURATION)
+	_slide_tween.tween_callback(func(): _sliding = false)
+
 func reset() -> void:
 	if _slide_tween:
 		_slide_tween.kill()

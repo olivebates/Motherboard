@@ -29,6 +29,7 @@ func _process(_delta: float) -> void:
 			_powered = true
 			break
 	if _powered != was_powered:
+		GameManager.last_activator_pos = get_center()
 		GameManager.set_wind_power(id, _powered)
 		queue_redraw()
 

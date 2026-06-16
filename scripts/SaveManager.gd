@@ -38,15 +38,21 @@ func notify_room_solved(room: Vector2i) -> void:
 	var entry = [room.x, room.y]
 	if not _rooms_solved.has(entry):
 		_rooms_solved.append(entry)
-		# Persist all currently-destroyed breakable walls in this room
 		var rx0 = room.x * 25
 		var ry0 = room.y * 12
+		# Persist all currently-destroyed breakable walls in this room
 		for wall in get_tree().get_nodes_in_group("breakable_walls"):
 			if not wall._destroyed:
 				continue
 			var gp: Vector2i = wall.get_grid_pos()
 			if gp.x >= rx0 and gp.x < rx0 + 25 and gp.y >= ry0 and gp.y < ry0 + 12:
 				notify_breakable_destroyed(gp)
+		# Permanently open all doors in this room
+		for door in get_tree().get_nodes_in_group("doors"):
+			var gp: Vector2i = door.get_grid_pos()
+			if gp.x >= rx0 and gp.x < rx0 + 25 and gp.y >= ry0 and gp.y < ry0 + 12:
+				if not door.is_open:
+					door.force_open()
 
 func notify_breakable_destroyed(gp: Vector2i) -> void:
 	var entry = [gp.x, gp.y]
@@ -167,6 +173,12 @@ func _build_save_data() -> Dictionary:
 		if key._collected:
 			keys_collected.append([key.start_grid_pos.x, key.start_grid_pos.y])
 	data["keys_collected"] = keys_collected
+
+	var orbs_collected := []
+	for orb in get_tree().get_nodes_in_group("power_orbs"):
+		if orb._collected:
+			orbs_collected.append([orb.position.x, orb.position.y])
+	data["orbs_collected"] = orbs_collected
 
 	data["key_doors_opened"] = _key_doors_opened.duplicate()
 	data["boss_doors_opened"] = _boss_doors_opened.duplicate()
@@ -320,6 +332,19 @@ func _apply_load(data: Dictionary) -> void:
 			key.sprite.visible = false
 			key.sprite.scale = Vector2.ONE
 
+	# Power orbs collected
+	var saved_orbs: Array = data.get("orbs_collected", [])
+	var orb_count = 0
+	for orb in get_tree().get_nodes_in_group("power_orbs"):
+		for so in saved_orbs:
+			if Vector2(float(so[0]), float(so[1])).distance_to(orb.position) < 1.0:
+				orb._collected = true
+				orb.queue_redraw()
+				orb_count += 1
+				break
+	PowerOrbCounter.count = orb_count
+	PowerOrbCounter.count_changed.emit(orb_count)
+
 	# Breakable walls permanently destroyed
 	for wall in get_tree().get_nodes_in_group("breakable_walls"):
 		if is_breakable_destroyed(wall.get_grid_pos()):
@@ -398,8 +423,7 @@ func _apply_load(data: Dictionary) -> void:
 		var gp: Vector2i = door.get_grid_pos()
 		var room = Vector2i(floori(float(gp.x) / 25.0), floori(float(gp.y) / 12.0))
 		if is_room_solved(room) and not door.is_open:
-			door.sprite.visible = false
-			door.is_open = true
+			door.force_open()
 
 	_show_status("Slot %d loaded" % active_slot)
 

@@ -17,7 +17,7 @@ const LINE_INNER = 14.0
 const LINE_OUTER = 38.0
 const LINE_TIP_HALF_W = 3.5
 const FLOAT_HEIGHT = 34.0
-const TOTAL_DURATION = 4.0
+const TOTAL_DURATION = 3.5
 const FLY_START = 3.0
 
 func _ready() -> void:

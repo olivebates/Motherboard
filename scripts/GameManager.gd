@@ -6,6 +6,7 @@ signal shake_requested(strength: float)
 var prongs: Array = []
 const MAX_PRONGS := 2
 var beam_blocked := false
+var last_activator_pos: Vector2 = Vector2.ZERO
 
 var _abilities: Dictionary = {}
 
@@ -24,6 +25,7 @@ func set_abilities(d: Dictionary) -> void:
 var floor_panels: Dictionary = {}
 var doors: Dictionary = {}
 var wind_powered_ids: Array = []
+var floor_switch_ids: Array = []
 
 func register_floor_panel(grid_pos: Vector2i, id: String, id2: String = "") -> void:
 	var ids: Array = [id]
@@ -54,6 +56,14 @@ func clear_prongs() -> Array:
 	prongs.clear()
 	return removed
 
+func set_floor_switch(switch_id: String, active: bool) -> void:
+	if active:
+		if switch_id not in floor_switch_ids:
+			floor_switch_ids.append(switch_id)
+	else:
+		floor_switch_ids.erase(switch_id)
+	evaluate_puzzle()
+
 func set_wind_power(turbine_id: String, powered: bool) -> void:
 	if powered:
 		if turbine_id not in wind_powered_ids:
@@ -67,6 +77,7 @@ func clear_scene_state() -> void:
 	doors.clear()
 	floor_panels.clear()
 	wind_powered_ids.clear()
+	floor_switch_ids.clear()
 	beam_blocked = false
 
 const PANEL_ACTIVATION_RADIUS := 24.0
@@ -96,6 +107,10 @@ func evaluate_puzzle() -> void:
 					ids_to_open.append(id)
 
 	for id in wind_powered_ids:
+		if id not in ids_to_open:
+			ids_to_open.append(id)
+
+	for id in floor_switch_ids:
 		if id not in ids_to_open:
 			ids_to_open.append(id)
 

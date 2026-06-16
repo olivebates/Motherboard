@@ -17,6 +17,8 @@ var room_entry_positions: Dictionary = {}
 var _cam_tween: Tween = null
 var _shake_amount := 0.0
 var _resetting := false
+var _last_push = null
+var _undo_push = null
 
 @onready var player: Node2D = $Player
 @onready var camera: Camera2D = $Camera2D
@@ -237,6 +239,12 @@ func shoot_door_ball(from: Vector2, to: Vector2, on_arrive: Callable) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("reset_room") and not player.movement_locked:
 		_reset_room()
+	if event is InputEventKey and event.pressed and not event.echo and not player.movement_locked:
+		if event.keycode == KEY_Z:
+			if _last_push != null:
+				undo_last_push()
+			elif _undo_push != null:
+				redo_last_push()
 	if event is InputEventKey and event.pressed and not event.echo:
 		if Input.is_key_pressed(KEY_K) and Input.is_key_pressed(KEY_C):
 			var other_keys = [KEY_W, KEY_A, KEY_S, KEY_D, KEY_SPACE, KEY_R,
@@ -245,6 +253,66 @@ func _unhandled_input(event: InputEvent) -> void:
 			if not any_other:
 				SaveManager.save_quicksave()
 				get_tree().change_scene_to_file("res://scenes/LevelEditor.tscn")
+
+func record_push(block: Node, from_pos: Vector2i, dir: Vector2i) -> void:
+	_last_push = {"block": block, "from": from_pos, "dir": dir}
+	_undo_push = null
+
+func undo_last_push() -> void:
+	if _last_push == null:
+		return
+	var entry = _last_push
+	var block = entry.block
+	if not is_instance_valid(block):
+		_last_push = null
+		return
+	var from_pos: Vector2i = entry.from
+	var dir: Vector2i = entry.dir
+	if player.grid_pos == from_pos and is_blocked(from_pos - dir):
+		AudioManager.play_sfx("electric_fail")
+		return
+	_last_push = null
+	_undo_push = entry
+	if player.grid_pos == from_pos:
+		var block_rect = Rect2(from_pos.x * TILE_SIZE, from_pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+		var pc = player.get_body_center()
+		const HALF := 5.0
+		var displacement = Vector2.ZERO
+		if dir.x > 0:
+			displacement.x = block_rect.position.x - (pc.x + HALF)
+		elif dir.x < 0:
+			displacement.x = block_rect.end.x - (pc.x - HALF)
+		elif dir.y > 0:
+			displacement.y = block_rect.position.y - (pc.y + HALF)
+		elif dir.y < 0:
+			displacement.y = block_rect.end.y - (pc.y - HALF)
+		if displacement != Vector2.ZERO:
+			player.push_out(displacement)
+	block.push_undo(from_pos)
+	_trigger_shake(0.8)
+	_update_beam()
+
+func redo_last_push() -> void:
+	if _undo_push == null:
+		return
+	var entry = _undo_push
+	var block = entry.block
+	if not is_instance_valid(block):
+		_undo_push = null
+		return
+	var from_pos: Vector2i = entry.from
+	var dir: Vector2i = entry.dir
+	var dest = from_pos + dir
+	if not can_push_block_to(dest):
+		return
+	if player.grid_pos == dest:
+		AudioManager.play_sfx("electric_fail")
+		return
+	_undo_push = null
+	_last_push = entry
+	block.push(dir)
+	_trigger_shake(0.8)
+	_update_beam()
 
 func _reset_room() -> void:
 	if _resetting:
@@ -260,6 +328,8 @@ func _reset_room() -> void:
 		if fgp.x >= rx0 and fgp.x < rx0 + ROOM_WIDTH and fgp.y >= ry0 and fgp.y < ry0 + ROOM_HEIGHT:
 			fan.prepare_reset()
 	await reset_effect.peaked
+	_last_push = null
+	_undo_push = null
 	for p in GameManager.prongs.duplicate():
 		var gp: Vector2i = p["grid_pos"]
 		if gp.x >= rx0 and gp.x < rx0 + ROOM_WIDTH and gp.y >= ry0 and gp.y < ry0 + ROOM_HEIGHT:
@@ -303,6 +373,10 @@ func _reset_room() -> void:
 		var tgp: Vector2i = turbine.get_grid_pos()
 		if tgp.x >= rx0 and tgp.x < rx0 + ROOM_WIDTH and tgp.y >= ry0 and tgp.y < ry0 + ROOM_HEIGHT:
 			turbine.reset()
+	for switch in get_tree().get_nodes_in_group("floor_switches"):
+		var sgp: Vector2i = switch.get_grid_pos()
+		if sgp.x >= rx0 and sgp.x < rx0 + ROOM_WIDTH and sgp.y >= ry0 and sgp.y < ry0 + ROOM_HEIGHT:
+			switch.reset()
 	for edoor in get_tree().get_nodes_in_group("enemy_doors"):
 		var egp: Vector2i = edoor.get_grid_pos()
 		if egp.x >= rx0 and egp.x < rx0 + ROOM_WIDTH and egp.y >= ry0 and egp.y < ry0 + ROOM_HEIGHT:
@@ -454,6 +528,8 @@ func check_room_transition(player_grid: Vector2i, player_pixel: Vector2 = Vector
 func _transition_to_room(new_room: Vector2i, auto_unlock: bool = true) -> void:
 	var direction := new_room - current_room
 	room_entry_positions[new_room] = player.grid_pos + direction
+	_last_push = null
+	_undo_push = null
 
 	for p in GameManager.clear_prongs():
 		p["node"].queue_free()
@@ -634,6 +710,7 @@ func spawn_prong(pixel_pos: Vector2) -> void:
 
 func _update_beam() -> void:
 	var world_positions := GameManager.get_prong_world_positions()
+	GameManager.last_activator_pos = player.get_body_center()
 	if world_positions.size() == 2:
 		var path := _compute_beam_path(world_positions[0], world_positions[1])
 		if path.is_empty():

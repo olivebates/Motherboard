@@ -80,6 +80,19 @@ func _clear_all_highlights() -> void:
 		if b.has_method("set_highlight"):
 			b.set_highlight(false)
 
+func push_undo(old_pos: Vector2i) -> void:
+	var cur_world := _grid_to_world(grid_pos)
+	grid_pos = old_pos
+	var old_world := _grid_to_world(old_pos)
+	position = old_world
+	sprite.position = cur_world - old_world + SPRITE_OFFSET
+	if _tween:
+		_tween.kill()
+	_tween = create_tween()
+	_tween.set_ease(Tween.EASE_OUT)
+	_tween.set_trans(Tween.TRANS_SINE)
+	_tween.tween_property(sprite, "position", SPRITE_OFFSET, SLIDE_DURATION)
+
 func reset() -> void:
 	if _tween:
 		_tween.kill()

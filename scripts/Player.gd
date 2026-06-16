@@ -360,9 +360,11 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: fl
 	_push_charge_time = 0.0
 	_push_charge_dir = Vector2i.ZERO
 	_push_charge_block = null
+	var push_from = block.grid_pos
 	block.push(dir)
 	_start_push_lock(dir)
 	main._trigger_shake(0.8)
+	main.record_push(block, push_from, dir)
 	return true
 
 func _sprite_center() -> Vector2:
@@ -442,6 +444,10 @@ func _is_inside_solid() -> bool:
 		if rect.intersects(solid):
 			return true
 	return false
+
+func push_out(displacement: Vector2) -> void:
+	position += displacement
+	visual_pos = position + _body_offset
 
 func look_up() -> void:
 	_facing = "back"

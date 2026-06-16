@@ -1,0 +1,12 @@
+[gd_scene load_steps=3 format=3 uid="uid://b00000021"]
+
+[ext_resource type="Script" path="res://scripts/FloorSwitch.gd" id="1_floorswitch"]
+[ext_resource type="Texture2D" uid="uid://bsjqfyhnm5x5x" path="res://Sprites/objects/floor_switch.png" id="2_floorswitch"]
+
+[node name="FloorSwitch" type="Node2D"]
+z_index = -10
+script = ExtResource("1_floorswitch")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_floorswitch")
+centered = false
