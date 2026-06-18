@@ -3,21 +3,47 @@ extends Node2D
 @export var id: String = ""
 @export var starts_open: bool = false
 
-const ANIM_DURATION := 0.15
-
 var is_open := false
 var _opening := false
-var _door_tween: Tween = null
+var _anim_version := 0
 
-@onready var sprite: Sprite2D = $Sprite2D
+@onready var sprite: AnimatedSprite2D = $AnimatedSprite2D
 
 func _ready() -> void:
 	add_to_group("doors")
+	_setup_animations()
+	sprite.frame = 0
+	sprite.stop()
 	GameManager.register_door(self, id)
 	GameManager.doors_update.connect(_on_doors_update)
 	if starts_open:
 		is_open = true
-		sprite.visible = false
+		sprite.frame = 4
+
+func _setup_animations() -> void:
+	var frames = SpriteFrames.new()
+	var texture = load("res://Sprites/objects/door.webp")
+	var frame_w = 32
+	var frame_h = 32
+	var cols = 5
+	frames.add_animation("open")
+	frames.set_animation_loop("open", false)
+	frames.set_animation_speed("open", 10)
+	for i in cols:
+		var atlas = AtlasTexture.new()
+		atlas.atlas = texture
+		atlas.region = Rect2(i * frame_w, 0, frame_w, frame_h)
+		frames.add_frame("open", atlas)
+	frames.add_animation("close")
+	frames.set_animation_loop("close", false)
+	frames.set_animation_speed("close", 10)
+	for i in range(cols - 1, -1, -1):
+		var atlas = AtlasTexture.new()
+		atlas.atlas = texture
+		atlas.region = Rect2(i * frame_w, 0, frame_w, frame_h)
+		frames.add_frame("close", atlas)
+	sprite.sprite_frames = frames
+	sprite.animation = "open"
 
 func _exit_tree() -> void:
 	GameManager.unregister_door(self, id)
@@ -50,32 +76,26 @@ func set_open(open: bool) -> void:
 		if not is_open:
 			return
 		is_open = false
-		if _door_tween:
-			_door_tween.kill()
-		sprite.modulate = Color.WHITE
-		sprite.visible = true
-		_apply_shrink_scale(0.0)
-		_door_tween = create_tween()
-		_door_tween.tween_method(_apply_shrink_scale, 0.0, 1.0, ANIM_DURATION)
+		_play_anim("close", func():
+			sprite.animation = "open"
+			sprite.frame = 0
+			sprite.stop()
+		)
 
 func _set_open_inverted(puzzle_active: bool) -> void:
 	if puzzle_active and SaveManager.is_room_solved(_get_room()):
 		return
 	if puzzle_active:
-		# Puzzle activated — close the door immediately (no ball)
 		_opening = false
 		if not is_open:
 			return
 		is_open = false
-		if _door_tween:
-			_door_tween.kill()
-		sprite.modulate = Color.WHITE
-		sprite.visible = true
-		_apply_shrink_scale(0.0)
-		_door_tween = create_tween()
-		_door_tween.tween_method(_apply_shrink_scale, 0.0, 1.0, ANIM_DURATION)
+		_play_anim("close", func():
+			sprite.animation = "open"
+			sprite.frame = 0
+			sprite.stop()
+		)
 	else:
-		# Puzzle deactivated — open the door with a DoorBall from the activator
 		if is_open or _opening:
 			return
 		_opening = true
@@ -85,40 +105,27 @@ func _set_open_inverted(puzzle_active: bool) -> void:
 			from = main.player.get_body_center()
 		main.shoot_door_ball(from, position + Vector2(16.0, 16.0), _do_open)
 
+func _play_anim(anim: String, on_finish: Callable) -> void:
+	_anim_version += 1
+	var v = _anim_version
+	sprite.play(anim)
+	sprite.animation_finished.connect(func():
+		if _anim_version == v:
+			on_finish.call()
+	, CONNECT_ONE_SHOT)
+
 func _do_open() -> void:
 	if not _opening:
 		return
 	_opening = false
 	is_open = true
-	if _door_tween:
-		_door_tween.kill()
 	GameManager.shake_requested.emit(5.0)
-	sprite.visible = true
-	sprite.modulate = Color.WHITE
-	_apply_shrink_scale(1.0)
-	_door_tween = create_tween()
-	_door_tween.tween_method(_apply_shrink_scale, 1.0, 0.0, ANIM_DURATION)
-	_door_tween.tween_callback(_on_open_finished)
+	_play_anim("open", func(): pass)
 
 func force_open() -> void:
 	_opening = false
-	if _door_tween:
-		_door_tween.kill()
+	_anim_version += 1
 	is_open = true
-	sprite.visible = false
-	_apply_shrink_scale(1.0)
-
-func _on_open_finished() -> void:
-	sprite.visible = false
-	sprite.modulate = Color.WHITE
-	_apply_shrink_scale(1.0)
-
-func _apply_shrink_scale(s: float) -> void:
-	var half := _sprite_half_size()
-	sprite.scale = Vector2(s, s)
-	sprite.position = half * (1.0 - s)
-
-func _sprite_half_size() -> Vector2:
-	if sprite.texture:
-		return sprite.texture.get_size() * 0.5
-	return Vector2(16.0, 16.0)
+	sprite.animation = "open"
+	sprite.frame = 4
+	sprite.stop()

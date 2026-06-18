@@ -42,8 +42,10 @@ func _ready() -> void:
 	hp = SPIDER_MAX_HP
 	_normal_tex = _sprite.texture
 	_sprite.centered = true
-	_sprite.position = Vector2(16.0, 16.0)
+	_sprite.position = Vector2(16.0, 16.0 - _ground_offset())
 	_sprite.rotation = _angle
+	# Keep the hitbox node at the tile center despite the origin shift.
+	$HitboxArea.position.y -= _ground_offset()
 	_lunge_initial_speed = LUNGE_TRAVEL * LUNGE_DECAY / (1.0 - exp(-LUNGE_DECAY * LUNGE_DURATION))
 
 func _hitbox(pos: Vector2) -> Rect2:
@@ -53,7 +55,8 @@ func _hitbox(pos: Vector2) -> Rect2:
 		half = Vector2(r, r)
 	else:
 		half = (_hitbox_col.shape as RectangleShape2D).size / 2.0
-	return Rect2(pos + _hitbox_col.position - half, half * 2.0)
+	var anchor: Vector2 = _hitbox_col.get_parent().position + _hitbox_col.position
+	return Rect2(pos + anchor - half, half * 2.0)
 
 func get_max_hp() -> int:
 	return SPIDER_MAX_HP
@@ -102,7 +105,10 @@ func _process(delta: float) -> void:
 	if not _in_current_room():
 		return
 	_eject_from_solid()
-	if _main.map_overlay._open:
+	var overlay = _main.get("map_overlay")
+	if overlay != null and overlay._open:
+		return
+	if _main.electric_beam == null:
 		return
 	if _dead:
 		return
@@ -111,7 +117,7 @@ func _process(delta: float) -> void:
 		_shake_timer -= delta
 
 	_visual_pos = _visual_pos.lerp(position, minf(1.0, SPRITE_SPEED * delta))
-	_sprite.position = _visual_pos - position + Vector2(16.0, 16.0) + _get_shake_offset()
+	_sprite.position = _visual_pos - position + Vector2(16.0, 16.0 - _ground_offset()) + _get_shake_offset()
 
 	_handle_beam()
 	if _dead:
@@ -204,7 +210,7 @@ func _process(delta: float) -> void:
 func reset() -> void:
 	super.reset()
 	_sprite.centered = true
-	_sprite.position = Vector2(16.0, 16.0)
+	_sprite.position = Vector2(16.0, 16.0 - _ground_offset())
 	_sprite.rotation = _angle
 	if _normal_tex != null:
 		_sprite.texture = _normal_tex

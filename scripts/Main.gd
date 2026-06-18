@@ -101,44 +101,89 @@ func _ready() -> void:
 		var splash := SplashScreenScene.new()
 		add_child(splash)
 		player.lock_movement()
-	_setup_mute_buttons()
+		var post_splash_color := modulate
+		modulate = Color.WHITE
+		splash.tree_exited.connect(func(): modulate = post_splash_color)
+	_setup_settings_button()
 
 
-var _music_btn: Button
-var _sfx_btn: Button
-var _btn_border_styles: Array[StyleBoxFlat] = []
-var _btn_hover_styles: Array[StyleBoxFlat] = []
+var _settings_btn: Button = null
+var _settings_canvas: CanvasLayer = null
+var _settings_panel: Control = null
+var _settings_panel_bg: StyleBoxFlat = null
+var _dim_btn: Button = null
+var _settings_open: bool = false
+var _settings_tween: Tween = null
+var _music_slider: HSlider = null
+var _sfx_slider: HSlider = null
+var _confirm_panel: Control = null
+var _settings_btn_styles: Array[StyleBoxFlat] = []
+var _settings_hover_styles: Array[StyleBoxFlat] = []
+var _settings_btns: Array[Button] = []
+var _settings_labels: Array[Label] = []
+var _settings_seps: Array[HSeparator] = []
+var _settings_slider_fills: Array[StyleBoxFlat] = []
+var _settings_slider_tracks: Array[StyleBoxFlat] = []
+var _settings_sliders: Array[HSlider] = []
+var _settings_outer_bg: StyleBoxFlat = null
 var _last_btn_color := Color.WHITE
 
-func _setup_mute_buttons() -> void:
-	var canvas := CanvasLayer.new()
-	canvas.layer = 60
-	add_child(canvas)
+class _EscapeHandler extends Node:
+	var main_ref: Node
+	func _unhandled_input(event: InputEvent) -> void:
+		if not (event is InputEventKey and event.pressed and not event.echo):
+			return
+		if event.keycode != KEY_ESCAPE:
+			return
+		if main_ref._settings_open:
+			main_ref._close_settings()
+		elif not main_ref.player.movement_locked:
+			main_ref._open_settings()
+		get_viewport().set_input_as_handled()
+const _PANEL_W := 260.0
+const _PANEL_H := 238.0
+const _PANEL_OPEN_X = (800.0 - _PANEL_W) / 2.0
+const _PANEL_Y = (384.0 - _PANEL_H) / 2.0
+const _PANEL_CLOSED_X = 820.0
+
+func _setup_settings_button() -> void:
+	_settings_canvas = CanvasLayer.new()
+	_settings_canvas.layer = 60
+	_settings_canvas.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_settings_canvas)
 
 	var row := HBoxContainer.new()
 	row.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	row.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	row.add_theme_constant_override("separation", 2)
-	canvas.add_child(row)
+	row.process_mode = Node.PROCESS_MODE_ALWAYS
+	_settings_canvas.add_child(row)
 
-	_music_btn = _make_mute_button("♪")
-	_music_btn.pressed.connect(_on_music_mute_pressed)
-	row.add_child(_music_btn)
+	_settings_btn = _make_ui_button("Settings")
+	_settings_btn.pressed.connect(_open_settings)
+	row.add_child(_settings_btn)
 
-	_sfx_btn = _make_mute_button("SFX")
-	_sfx_btn.pressed.connect(_on_sfx_mute_pressed)
-	row.add_child(_sfx_btn)
+	_dim_btn = Button.new()
+	_dim_btn.process_mode = Node.PROCESS_MODE_ALWAYS
+	_dim_btn.focus_mode = Control.FOCUS_NONE
+	_dim_btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var dim_style := StyleBoxFlat.new()
+	dim_style.bg_color = Color(0.0, 0.0, 0.0, 0.0)
+	_dim_btn.add_theme_stylebox_override("normal", dim_style)
+	_dim_btn.add_theme_stylebox_override("hover", dim_style)
+	_dim_btn.add_theme_stylebox_override("pressed", dim_style)
+	_dim_btn.add_theme_stylebox_override("focus", dim_style)
+	_dim_btn.visible = false
+	_dim_btn.pressed.connect(_close_settings)
+	_settings_canvas.add_child(_dim_btn)
 
-	_update_mute_button(_music_btn, AudioManager.is_music_muted())
-	_update_mute_button(_sfx_btn, AudioManager.is_sfx_muted())
-	_refresh_mute_button_colors(modulate)
-	call_deferred("_equalize_button_sizes")
+	var esc_handler := _EscapeHandler.new()
+	esc_handler.main_ref = self
+	esc_handler.process_mode = Node.PROCESS_MODE_ALWAYS
+	_settings_canvas.add_child(esc_handler)
 
-func _equalize_button_sizes() -> void:
-	var w := maxf(_music_btn.size.x, _sfx_btn.size.x)
-	var h := maxf(_music_btn.size.y, _sfx_btn.size.y)
-	_music_btn.custom_minimum_size = Vector2(w, h)
-	_sfx_btn.custom_minimum_size = Vector2(w, h)
+	_build_settings_panel()
+	_refresh_settings_colors(modulate)
 
 func _make_btn_style(bg: Color, border: Color) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
@@ -148,10 +193,11 @@ func _make_btn_style(bg: Color, border: Color) -> StyleBoxFlat:
 	s.set_content_margin_all(1)
 	return s
 
-func _make_mute_button(label: String) -> Button:
+func _make_ui_button(label: String) -> Button:
 	var btn := Button.new()
 	btn.text = label
 	btn.focus_mode = Control.FOCUS_NONE
+	btn.process_mode = Node.PROCESS_MODE_ALWAYS
 	btn.add_theme_font_size_override("font_size", 9)
 	var c := modulate
 	var sn := _make_btn_style(Color.BLACK, c)
@@ -166,31 +212,362 @@ func _make_mute_button(label: String) -> Button:
 	btn.add_theme_color_override("font_hover_color", Color.BLACK)
 	btn.add_theme_color_override("font_pressed_color", c)
 	btn.add_theme_color_override("font_focus_color", c)
-	_btn_border_styles.append_array([sn, sp, sf])
-	_btn_hover_styles.append(sh)
+	_settings_btn_styles.append_array([sn, sp, sf])
+	_settings_hover_styles.append(sh)
+	_settings_btns.append(btn)
 	return btn
 
-func _refresh_mute_button_colors(c: Color) -> void:
-	for s in _btn_border_styles:
+func _refresh_settings_colors(c: Color) -> void:
+	for s in _settings_btn_styles:
 		s.border_color = c
-	for s in _btn_hover_styles:
+	for s in _settings_hover_styles:
 		s.bg_color = c
 		s.border_color = c
-	for btn in [_music_btn, _sfx_btn]:
-		if btn == null:
+	for btn in _settings_btns:
+		if not is_instance_valid(btn):
 			continue
 		btn.add_theme_color_override("font_color", c)
 		btn.add_theme_color_override("font_pressed_color", c)
 		btn.add_theme_color_override("font_focus_color", c)
+	if _settings_panel_bg != null:
+		_settings_panel_bg.border_color = c
+	for lbl in _settings_labels:
+		if is_instance_valid(lbl):
+			lbl.add_theme_color_override("font_color", c)
+	for sep in _settings_seps:
+		if is_instance_valid(sep):
+			sep.modulate = c
+	for s in _settings_slider_fills:
+		s.bg_color = c
+	for s in _settings_slider_tracks:
+		s.bg_color = Color(c.r, c.g, c.b, 0.25)
+		s.border_color = Color(c.r, c.g, c.b, 0.5)
+	if not _settings_sliders.is_empty():
+		var grabber = _make_grabber_icon(c)
+		for slider in _settings_sliders:
+			if is_instance_valid(slider):
+				slider.add_theme_icon_override("grabber", grabber)
+				slider.add_theme_icon_override("grabber_highlight", grabber)
+				slider.add_theme_icon_override("grabber_disabled", grabber)
+	if _settings_outer_bg != null:
+		_settings_outer_bg.border_color = c
 
-func _update_mute_button(btn: Button, muted: bool) -> void:
-	btn.modulate = Color(0.35, 0.35, 0.35) if muted else Color.WHITE
+func _make_grabber_icon(c: Color) -> ImageTexture:
+	var radius := 5
+	var size := radius * 2 + 2
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var center := Vector2(float(size) * 0.5, float(size) * 0.5)
+	for y in range(size):
+		for x in range(size):
+			var d := Vector2(float(x) + 0.5, float(y) + 0.5).distance_to(center)
+			img.set_pixel(x, y, c if d <= float(radius) else Color(0, 0, 0, 0))
+	return ImageTexture.create_from_image(img)
 
-func _on_music_mute_pressed() -> void:
-	_update_mute_button(_music_btn, AudioManager.toggle_music_mute())
+func _build_settings_panel() -> void:
+	_settings_panel = Control.new()
+	_settings_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_settings_panel.position = Vector2(_PANEL_CLOSED_X, _PANEL_Y)
+	_settings_panel.custom_minimum_size = Vector2(_PANEL_W, _PANEL_H)
+	_settings_panel.size = Vector2(_PANEL_W, _PANEL_H)
 
-func _on_sfx_mute_pressed() -> void:
-	_update_mute_button(_sfx_btn, AudioManager.toggle_sfx_mute())
+	# Outermost border: 2px main color
+	_settings_outer_bg = StyleBoxFlat.new()
+	_settings_outer_bg.bg_color = Color.BLACK
+	_settings_outer_bg.border_color = modulate
+	_settings_outer_bg.set_border_width_all(2)
+	_settings_outer_bg.set_content_margin_all(2)
+	var panel_outer := PanelContainer.new()
+	panel_outer.process_mode = Node.PROCESS_MODE_ALWAYS
+	panel_outer.add_theme_stylebox_override("panel", _settings_outer_bg)
+	panel_outer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_settings_panel.add_child(panel_outer)
+
+	# Middle border: 1px black
+	var mid_bg := StyleBoxFlat.new()
+	mid_bg.bg_color = Color.BLACK
+	mid_bg.border_color = Color.BLACK
+	mid_bg.set_border_width_all(1)
+	mid_bg.set_content_margin_all(1)
+	var panel_mid := PanelContainer.new()
+	panel_mid.process_mode = Node.PROCESS_MODE_ALWAYS
+	panel_mid.add_theme_stylebox_override("panel", mid_bg)
+	panel_outer.add_child(panel_mid)
+
+	# Inner border: 2px main color + content padding
+	_settings_panel_bg = StyleBoxFlat.new()
+	_settings_panel_bg.bg_color = Color.BLACK
+	_settings_panel_bg.border_color = modulate
+	_settings_panel_bg.set_border_width_all(2)
+	_settings_panel_bg.set_content_margin_all(10)
+	var panel_inner := PanelContainer.new()
+	panel_inner.process_mode = Node.PROCESS_MODE_ALWAYS
+	panel_inner.add_theme_stylebox_override("panel", _settings_panel_bg)
+	panel_mid.add_child(panel_inner)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	panel_inner.add_child(vbox)
+
+	# Title row with X close button
+	var title_row := HBoxContainer.new()
+	vbox.add_child(title_row)
+
+	var title := Label.new()
+	title.text = "Settings"
+	title.add_theme_font_size_override("font_size", 12)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.add_theme_color_override("font_color", modulate)
+	_settings_labels.append(title)
+	title_row.add_child(title)
+
+	var close_btn := _make_ui_button("✕")
+	close_btn.add_theme_font_size_override("font_size", 11)
+	close_btn.pressed.connect(_close_settings)
+	title_row.add_child(close_btn)
+	close_btn.resized.connect(func():
+		var h = close_btn.size.y
+		if h > 0 and close_btn.custom_minimum_size.x != h:
+			close_btn.custom_minimum_size = Vector2(h, h)
+	)
+
+	var sep1 := HSeparator.new()
+	sep1.modulate = modulate
+	_settings_seps.append(sep1)
+	vbox.add_child(sep1)
+
+	vbox.add_child(_make_slider_row("Music Volume", AudioManager.get_music_volume(), func(v): AudioManager.set_music_volume(v), true))
+	vbox.add_child(_make_slider_row("SFX Volume", AudioManager.get_sfx_volume(), func(v): AudioManager.set_sfx_volume(v), false))
+
+	var sep2 := HSeparator.new()
+	sep2.modulate = modulate
+	_settings_seps.append(sep2)
+	vbox.add_child(sep2)
+
+	var save_row := HBoxContainer.new()
+	save_row.add_theme_constant_override("separation", 6)
+	var export_btn := _make_ui_button("Export Save")
+	export_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	export_btn.pressed.connect(_on_export_save_pressed)
+	save_row.add_child(export_btn)
+	var import_btn := _make_ui_button("Import Save")
+	import_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	import_btn.pressed.connect(_on_import_save_pressed)
+	save_row.add_child(import_btn)
+	vbox.add_child(save_row)
+
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(spacer)
+
+	var sep3 := HSeparator.new()
+	sep3.modulate = modulate
+	_settings_seps.append(sep3)
+	vbox.add_child(sep3)
+
+	var del_btn := _make_ui_button("Delete Save File")
+	del_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	del_btn.pressed.connect(_on_delete_save_pressed)
+	vbox.add_child(del_btn)
+
+	_settings_panel.visible = false
+	_settings_canvas.add_child(_settings_panel)
+
+func _make_slider_row(label_text: String, initial_value: float, on_change: Callable, is_music: bool) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.add_theme_font_size_override("font_size", 10)
+	lbl.add_theme_color_override("font_color", modulate)
+	lbl.custom_minimum_size.x = 88
+	_settings_labels.append(lbl)
+	row.add_child(lbl)
+
+	var track_style := StyleBoxFlat.new()
+	track_style.bg_color = Color(modulate.r, modulate.g, modulate.b, 0.25)
+	track_style.border_color = Color(modulate.r, modulate.g, modulate.b, 0.5)
+	track_style.set_border_width_all(1)
+	_settings_slider_tracks.append(track_style)
+
+	var fill_style := StyleBoxFlat.new()
+	fill_style.bg_color = modulate
+	_settings_slider_fills.append(fill_style)
+
+	var slider := HSlider.new()
+	slider.process_mode = Node.PROCESS_MODE_ALWAYS
+	slider.min_value = 0.0
+	slider.max_value = 1.0
+	slider.step = 0.05
+	slider.value = initial_value
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.custom_minimum_size.y = 14
+	slider.focus_mode = Control.FOCUS_NONE
+	slider.add_theme_stylebox_override("slider", track_style)
+	slider.add_theme_stylebox_override("grabber_area", fill_style)
+	slider.add_theme_stylebox_override("grabber_area_highlight", fill_style)
+	slider.value_changed.connect(on_change)
+	if is_music:
+		_music_slider = slider
+	else:
+		_sfx_slider = slider
+		slider.drag_ended.connect(func(_changed: bool): AudioManager.play_sfx("plant_stake"))
+	_settings_sliders.append(slider)
+	row.add_child(slider)
+
+	return row
+
+func _open_settings() -> void:
+	if _settings_open or _resetting:
+		return
+	_settings_open = true
+	player.lock_movement()
+	get_tree().paused = true
+	_dim_btn.visible = true
+	_settings_panel.visible = true
+	if _music_slider != null:
+		_music_slider.value = AudioManager.get_music_volume()
+	if _sfx_slider != null:
+		_sfx_slider.value = AudioManager.get_sfx_volume()
+	if _settings_tween:
+		_settings_tween.kill()
+	_settings_tween = _settings_panel.create_tween()
+	_settings_tween.set_ease(Tween.EASE_OUT)
+	_settings_tween.set_trans(Tween.TRANS_SINE)
+	_settings_tween.tween_property(_settings_panel, "position:x", _PANEL_OPEN_X, 0.25)
+
+func _close_settings() -> void:
+	if not _settings_open:
+		return
+	if _confirm_panel != null:
+		_confirm_panel.queue_free()
+		_confirm_panel = null
+	if _settings_tween:
+		_settings_tween.kill()
+	_settings_tween = _settings_panel.create_tween()
+	_settings_tween.set_ease(Tween.EASE_IN)
+	_settings_tween.set_trans(Tween.TRANS_SINE)
+	_settings_tween.tween_property(_settings_panel, "position:x", _PANEL_CLOSED_X, 0.2)
+	_settings_tween.tween_callback(func():
+		_settings_panel.visible = false
+		_dim_btn.visible = false
+		_settings_open = false
+		get_tree().paused = false
+		player.unlock_movement()
+	)
+
+func _on_export_save_pressed() -> void:
+	var encoded = SaveManager.export_save_string()
+	var dialog := AcceptDialog.new()
+	dialog.process_mode = Node.PROCESS_MODE_ALWAYS
+	dialog.title = "Export Save"
+	var vbox := VBoxContainer.new()
+	var lbl := Label.new()
+	lbl.text = "Copy this save code:"
+	lbl.add_theme_font_size_override("font_size", 10)
+	vbox.add_child(lbl)
+	var edit := TextEdit.new()
+	edit.text = encoded if encoded != "" else "(no save data)"
+	edit.editable = false
+	edit.custom_minimum_size = Vector2(440, 100)
+	edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	vbox.add_child(edit)
+	dialog.add_child(vbox)
+	_settings_canvas.add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
+
+func _on_import_save_pressed() -> void:
+	var dialog := AcceptDialog.new()
+	dialog.process_mode = Node.PROCESS_MODE_ALWAYS
+	dialog.title = "Import Save"
+	dialog.get_ok_button().text = "Import"
+	var vbox := VBoxContainer.new()
+	var lbl := Label.new()
+	lbl.text = "Paste save code:"
+	lbl.add_theme_font_size_override("font_size", 10)
+	vbox.add_child(lbl)
+	var edit := TextEdit.new()
+	edit.custom_minimum_size = Vector2(440, 100)
+	edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	vbox.add_child(edit)
+	dialog.add_child(vbox)
+	_settings_canvas.add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(func():
+		var encoded = edit.text.strip_edges()
+		if encoded == "":
+			return
+		get_tree().paused = false
+		if not SaveManager.import_save_string(encoded):
+			get_tree().paused = true
+	)
+	dialog.canceled.connect(dialog.queue_free)
+
+func _on_delete_save_pressed() -> void:
+	if _confirm_panel != null:
+		return
+
+	var c := modulate
+	_confirm_panel = Control.new()
+	_confirm_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_confirm_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	var cp_bg := StyleBoxFlat.new()
+	cp_bg.bg_color = Color.BLACK
+	cp_bg.border_color = c
+	cp_bg.set_border_width_all(2)
+	cp_bg.set_content_margin_all(12)
+
+	var cp_panel := PanelContainer.new()
+	cp_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	cp_panel.add_theme_stylebox_override("panel", cp_bg)
+	cp_panel.custom_minimum_size = Vector2(220, 90)
+	cp_panel.size = Vector2(220, 90)
+	cp_panel.position = Vector2((800.0 - 220.0) / 2.0, (384.0 - 90.0) / 2.0)
+	_confirm_panel.add_child(cp_panel)
+
+	var cvbox := VBoxContainer.new()
+	cvbox.add_theme_constant_override("separation", 8)
+	cp_panel.add_child(cvbox)
+
+	var warn := Label.new()
+	warn.text = "Delete all save data?"
+	warn.add_theme_font_size_override("font_size", 10)
+	warn.add_theme_color_override("font_color", c)
+	warn.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cvbox.add_child(warn)
+
+	var warn2 := Label.new()
+	warn2.text = "This cannot be undone."
+	warn2.add_theme_font_size_override("font_size", 9)
+	warn2.add_theme_color_override("font_color", c)
+	warn2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cvbox.add_child(warn2)
+
+	var btn_row := HBoxContainer.new()
+	btn_row.add_theme_constant_override("separation", 6)
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	cvbox.add_child(btn_row)
+
+	var yes_btn := _make_ui_button("Yes, Delete")
+	yes_btn.pressed.connect(_confirm_delete_save)
+	btn_row.add_child(yes_btn)
+
+	var no_btn := _make_ui_button("Cancel")
+	no_btn.pressed.connect(func():
+		_confirm_panel.queue_free()
+		_confirm_panel = null
+	)
+	btn_row.add_child(no_btn)
+
+	_settings_canvas.add_child(_confirm_panel)
+
+func _confirm_delete_save() -> void:
+	get_tree().paused = false
+	SaveManager.delete_active_save()
 
 
 func _setup_y_sort_children() -> void:
@@ -209,12 +586,12 @@ func _setup_y_sort_children() -> void:
 			node.reparent(wall_tilemap, true)
 
 func _process(delta: float) -> void:
-	_shake_amount = lerpf(_shake_amount, 0.0, 20.0 * delta)
-	camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake_amount
+	_shake_amount = lerpf(_shake_amount, 0.0, 9.0 * delta)
+	camera.offset = Vector2(randf_range(-1.6, 1.6), randf_range(-1.6, 1.6)) * _shake_amount
 	_update_tab_label()
 	if modulate != _last_btn_color:
 		_last_btn_color = modulate
-		_refresh_mute_button_colors(modulate)
+		_refresh_settings_colors(modulate)
 
 func _update_tab_label() -> void:
 	if _tab_label == null:

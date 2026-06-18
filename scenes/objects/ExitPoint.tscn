@@ -1,0 +1,12 @@
+[gd_scene load_steps=3 format=3 uid="uid://pqu8670bmyt7"]
+
+[ext_resource type="Script" path="res://scripts/ExitPoint.gd" id="1_epscript"]
+[ext_resource type="Texture2D" uid="uid://cwn2fl3n56lng" path="res://Sprites/objects/teleport_closed.png" id="2_eptex"]
+
+[node name="ExitPoint" type="Node2D"]
+script = ExtResource("1_epscript")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+z_index = -10
+position = Vector2(16, 16)
+texture = ExtResource("2_eptex")

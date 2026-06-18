@@ -4,7 +4,6 @@ enum MoveState { IDLE, HOP, JUMP_WINDUP, JUMP }
 
 const BOUNCE_MAX_HP := 50
 const MOVE_SPEED := 0.286
-const SORT_ABOVE_WALLS_Z := 64
 const SPRITE_LAG_SPEED := 24.0
 const WAIT_MIN := 0.5
 const WAIT_MAX := 0.8
@@ -31,6 +30,10 @@ var _room_y0 := 0
 
 var _path: Array[Vector2i] = []
 var _path_timer := 0.0
+# Per-pathfind memo of _main.is_blocked() results. is_blocked() is expensive
+# (it scans ~11 node groups across the whole scene tree per call), and A* queries
+# the same cells many times, so we evaluate each cell at most once per _find_path().
+var _blocked_cache: Dictionary = {}
 var _move_state: MoveState = MoveState.IDLE
 var _hop_from := Vector2.ZERO
 var _hop_to := Vector2.ZERO
@@ -43,6 +46,8 @@ var _wait_duration := 0.0
 var _hop_t := 0.0
 var _sprite_scale := Vector2.ONE
 var _idle_time := 0.0
+
+@onready var _hitbox_shape: CollisionShape2D = $HitboxArea/HitboxShape
 
 func get_max_hp() -> int:
 	return BOUNCE_MAX_HP
@@ -59,10 +64,15 @@ func _handle_beam() -> void:
 
 func _ready() -> void:
 	super._ready()
-	z_index = SORT_ABOVE_WALLS_Z
 	add_to_group("bounce_enemies")
+	# Keep the dragged hitbox at its authored world spot despite the origin shift.
+	$HitboxArea.position.y -= _ground_offset()
+	# Park the sprite at its resting pose so it sits correctly in the editor,
+	# where _sync_sprite() never runs — matches the first playtest frame.
+	_sprite.position = _rest_sprite_position()
+	_sprite.scale = Vector2.ONE
 	hp = get_max_hp()
-	var start_gp := _world_to_grid(_start_pos)
+	var start_gp := _world_to_grid(_start_pos - Vector2(0.0, _ground_offset()))
 	_room_x0 = floori(float(start_gp.x) / ROOM_WIDTH) * ROOM_WIDTH
 	_room_y0 = floori(float(start_gp.y) / ROOM_HEIGHT) * ROOM_HEIGHT
 
@@ -72,8 +82,11 @@ func _process(delta: float) -> void:
 		return
 	if not _in_current_room():
 		return
-	if _main.map_overlay._open:
+	var overlay = _main.get("map_overlay")
+	if overlay != null and overlay._open:
 		_sync_sprite(delta)
+		return
+	if _main.electric_beam == null:
 		return
 
 	_check_beam_and_contact()
@@ -102,6 +115,11 @@ func _process(delta: float) -> void:
 func _eject_from_solid() -> void:
 	pass
 
+# Contact hitbox center follows the HitboxShape node, which can be dragged
+# around in the editor to tune where the enemy collides with the player/beam.
+func get_center() -> Vector2:
+	return position + _hitbox_shape.global_position - global_position
+
 func _check_beam_and_contact() -> void:
 	_handle_beam()
 	if _dead:
@@ -117,25 +135,34 @@ func _can_hurt_player() -> bool:
 func _apply_scale_target(target: Vector2, delta: float) -> void:
 	_sprite_scale = _sprite_scale.lerp(target, minf(1.0, SCALE_LERP * delta))
 
+# Resting sprite offset (scale 1, no hop arc, no lag) — the value _sync_sprite()
+# produces at rest, so the editor-placed sprite lands where it sits on the first
+# playtest frame.
+func _rest_sprite_position() -> Vector2:
+	var pivot := Vector2(16.0 - 32.0, 32.0 - 64.0)
+	return pivot + Vector2(0.0, -_ground_offset())
+
 func _sync_sprite(delta: float) -> void:
 	var arc := 0.0
 	if _move_state in [MoveState.HOP, MoveState.JUMP]:
 		arc = sin(_hop_t * PI) * _hop_height
 	_visual_pos = _visual_pos.lerp(position, minf(1.0, SPRITE_LAG_SPEED * delta))
 	var lag := _visual_pos - position
-	var pivot := Vector2(16.0 * (1.0 - _sprite_scale.x), 32.0 * (1.0 - _sprite_scale.y))
-	_sprite.position = lag + pivot + Vector2(0.0, -arc)
+	# 64x64 sprite drawn with its bottom-center anchored at the tile's
+	# bottom-center (16, 32); scaling pivots around that bottom-center.
+	var pivot := Vector2(16.0 - 32.0 * _sprite_scale.x, 32.0 - 64.0 * _sprite_scale.y)
+	_sprite.position = lag + pivot + Vector2(0.0, -arc - _ground_offset())
 	_sprite.scale = _sprite.scale.lerp(_sprite_scale, SCALE_LERP * delta)
 
 func _recalc_path() -> void:
-	var from := _world_to_grid(position)
+	var from := _self_cell()
 	var to := _world_to_grid(_main.player.get_body_center())
 	_path = _find_path(from, to)
 
 func _begin_next_step() -> void:
 	if _path.is_empty():
 		return
-	var from_gp := _world_to_grid(position)
+	var from_gp := _self_cell()
 	var next_gp: Vector2i = _path[0]
 	var delta_gp := next_gp - from_gp
 	if absi(delta_gp.x) + absi(delta_gp.y) != 1 and not _is_jump_delta(from_gp, next_gp):
@@ -204,17 +231,30 @@ func _process_hop(delta: float) -> void:
 func _world_to_grid(pos: Vector2) -> Vector2i:
 	return Vector2i(floori(pos.x / TILE_SIZE), floori(pos.y / TILE_SIZE))
 
+# Cell the enemy currently occupies (accounts for the ground-line origin shift).
+func _self_cell() -> Vector2i:
+	return _world_to_grid(position - Vector2(0.0, _ground_offset()))
+
 func _grid_to_world(gp: Vector2i) -> Vector2:
-	return Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE)
+	return Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE + _ground_offset())
+
+func _cell_blocked(gp: Vector2i) -> bool:
+	var cached: Variant = _blocked_cache.get(gp)
+	if cached != null:
+		return cached
+	var result = _main.is_blocked(gp)
+	_blocked_cache[gp] = result
+	return result
 
 func _is_walkable(gp: Vector2i) -> bool:
 	if gp.x < _room_x0 or gp.x >= _room_x0 + ROOM_WIDTH:
 		return false
 	if gp.y < _room_y0 or gp.y >= _room_y0 + ROOM_HEIGHT:
 		return false
-	return not _main.is_blocked(gp)
+	return not _cell_blocked(gp)
 
 func _find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
+	_blocked_cache.clear()
 	if from == to:
 		return []
 	# A* with Manhattan heuristic
@@ -261,7 +301,7 @@ func _path_neighbors(gp: Vector2i) -> Array[Vector2i]:
 			result.append(step)
 		var wall := gp + d
 		var land := gp + d * 2
-		if _main.is_blocked(wall) and _is_walkable(land):
+		if _cell_blocked(wall) and _is_walkable(land):
 			result.append(land)
 	return result
 
@@ -288,3 +328,4 @@ func reset() -> void:
 	_idle_time = 0.0
 	_sprite_scale = Vector2.ONE
 	_sprite.scale = Vector2.ONE
+	_sprite.position = _rest_sprite_position()

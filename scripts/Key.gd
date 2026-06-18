@@ -15,6 +15,10 @@ func _ready() -> void:
 	_setup_animations()
 
 func _setup_animations() -> void:
+	if sprite == null:
+		sprite = AnimatedSprite2D.new()
+		sprite.centered = false
+		add_child(sprite)
 	var frames = SpriteFrames.new()
 	frames.remove_animation("default")
 	_add_sheet(frames, "idle",   "res://Sprites/objects/Key_File.webp", 7, 2, 14, 10.0, true)

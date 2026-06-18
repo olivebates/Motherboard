@@ -1,14 +1,22 @@
 extends "res://scripts/WaterEnemy.gd"
 
-enum State { CHASE, WOBBLE, BIG_BOUNCE_WINDUP, BIG_BOUNCE, DYING }
+enum State { CHASE, BIG_BOUNCE_WINDUP, BIG_BOUNCE, DYING }
 enum HopState { IDLE, HOP, BIG_JUMP }
 
-const BOSS_MAX_HP := 5
+const BOSS_MAX_HP := 1800
+const PANEL_SWITCH_STEP := 300
+# Panels stay at least this many tiles away from the room edges.
+const PANEL_BORDER := 3
+# Both panels share this id; fans with the same id turn on while both are beam-lit.
+const PANEL_ID := "bounceboss"
+# Fixed seed so panel positions are identical on every room reset.
+const PANEL_RNG_SEED := 0x420B055
 const BOSS_SCALE := 2.0
 const SORT_Z := 64
 
-const BASE_MOVE_SPEED := 0.30
-const MAX_MOVE_SPEED := 0.75
+const BASE_MOVE_SPEED := 0.15
+# At 0 hp the boss moves 4x its starting (full-hp) speed.
+const MAX_MOVE_SPEED := BASE_MOVE_SPEED * 4.0
 
 const PATH_RECALC := 0.35
 const SCALE_LERP := 15.0
@@ -18,6 +26,14 @@ const WAIT_MIN := 0.5
 const WAIT_MAX := 0.8
 const HOP_DURATION := 0.28
 const HOP_HEIGHT := 12.0
+# Leap that clears a single solid block: the block sits at the take-off cell + 1,
+# the boss lands two tiles away (it paths as a single 32x32 tile).
+const JUMP_TILES := 2
+const JUMP_HOP_DURATION := 0.4
+const JUMP_HOP_HEIGHT := 44.0
+# Screen shake (px) on landing from a normal hop vs. a long (big bounce) jump.
+const LAND_SHAKE := 2.0
+const LONG_JUMP_SHAKE := 4.0
 const HOP_STRETCH_X := 0.88
 const HOP_STRETCH_Y := 1.12
 const LANDING_SQUASH_X := 1.18
@@ -28,18 +44,12 @@ const BIG_BOUNCE_WINDUP_DUR := 0.8
 const BIG_BOUNCE_DURATION := 0.7
 const BIG_BOUNCE_HEIGHT := 90.0
 
-const SPAWN_INTERVAL_MIN := 2.0
-const SPAWN_INTERVAL_MAX := 4.0
-const WOBBLE_DURATION := 1.0
-const SPAWN_DIST := 96.0
-
 const BOSS_CONTACT_DIST := 30.0
 
 const _CARDINALS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)
 ]
 
-const BounceEnemyScene = preload("res://scenes/enemies/BounceEnemy.tscn")
 const BounceBossPanelScene = preload("res://scenes/enemies/BounceBossPanel.tscn")
 
 var _state: State = State.CHASE
@@ -56,15 +66,26 @@ var _wait_timer := 0.0
 var _wait_duration := 0.0
 var _path: Array[Vector2i] = []
 var _path_timer := 0.0
+# Per-pathfind memo of _main.is_blocked() results. is_blocked() is expensive
+# (it scans ~11 node groups across the whole scene tree per call), and BFS queries
+# the same cells many times, so we evaluate each cell at most once per _find_path().
+var _blocked_cache: Dictionary = {}
+# Home-room tile bounds. Pathfinding is clamped here so a jump can't carry the
+# search over the perimeter walls into open space, which would never terminate.
+var _room_x0 := 0
+var _room_y0 := 0
 
 var _big_bounce_timer := BIG_BOUNCE_INTERVAL
-var _spawn_timer := SPAWN_INTERVAL_MAX
 var _pulse_time := 0.0
 
 var _panel_a: Node2D = null
 var _panel_b: Node2D = null
-var _object_falling := false
-var _falling_obj: Node2D = null
+# Panels relocate each time hp drops past the next 100-hp threshold.
+var _next_panel_hp := BOSS_MAX_HP - PANEL_SWITCH_STEP
+# Seeded RNG drives panel placement so the sequence repeats on every reset.
+var _panel_rng := RandomNumberGenerator.new()
+# Counts placements (initial spawn = 1, then one per hp threshold).
+var _panel_place_count := 0
 
 var _death_tween: Tween
 var _arc_started := false
@@ -77,6 +98,10 @@ func get_max_hp() -> int:
 func _ready() -> void:
 	super._ready()
 	add_to_group("bounce_boss")
+	_panel_rng.seed = PANEL_RNG_SEED
+	var room := _get_home_room()
+	_room_x0 = room.x * 25
+	_room_y0 = room.y * 12
 	scale = Vector2(BOSS_SCALE, BOSS_SCALE)
 	z_index = SORT_Z
 	hp = BOSS_MAX_HP
@@ -92,6 +117,10 @@ func _register_health_bar() -> void:
 
 # ── Hitbox ────────────────────────────────────────────────────────────────────
 
+# Boss keeps its origin at the tile top-left and sorts by its own rules.
+func _ground_offset() -> float:
+	return 0.0
+
 func get_center() -> Vector2:
 	return position + Vector2(16.0 * BOSS_SCALE, 16.0 * BOSS_SCALE)
 
@@ -102,71 +131,59 @@ func _spawn_panels() -> void:
 	_panel_b = BounceBossPanelScene.instantiate()
 	_panel_a.positive = true
 	_panel_b.positive = false
+	_panel_a.id = PANEL_ID
+	_panel_b.id = PANEL_ID
 	_main.wall_tilemap.add_child(_panel_a)
 	_main.wall_tilemap.add_child(_panel_b)
-	_place_panels_randomly()
+	_place_panels_randomly(false)
 
-func _place_panels_randomly() -> void:
+# Picks two distinct cells from the deterministic candidate list using the seeded
+# RNG, so the same fight always produces the same panel positions. When animate is
+# true the panels shrink/grow into place; otherwise they snap (initial / reset).
+func _place_panels_randomly(animate: bool) -> void:
+	if not is_instance_valid(_panel_a) or not is_instance_valid(_panel_b):
+		return
 	var candidates := _get_valid_panel_positions()
-	candidates.shuffle()
-	if candidates.size() >= 1:
-		_panel_a.position = Vector2(candidates[0].x * TILE_SIZE, candidates[0].y * TILE_SIZE)
-	if candidates.size() >= 2:
-		_panel_b.position = Vector2(candidates[1].x * TILE_SIZE, candidates[1].y * TILE_SIZE)
+	if candidates.is_empty():
+		return
+	_panel_place_count += 1
+	# The 5th/6th placements collide with earlier tiles under the base seed, so
+	# nudge the stream by 1 to land them on different positions.
+	if _panel_place_count == 5:
+		_panel_rng.seed = PANEL_RNG_SEED + 1
+	var i_a := _panel_rng.randi_range(0, candidates.size() - 1)
+	var i_b := i_a
+	if candidates.size() > 1:
+		while i_b == i_a:
+			i_b = _panel_rng.randi_range(0, candidates.size() - 1)
+	var pos_a := Vector2(candidates[i_a].x * TILE_SIZE, candidates[i_a].y * TILE_SIZE)
+	var pos_b := Vector2(candidates[i_b].x * TILE_SIZE, candidates[i_b].y * TILE_SIZE)
+	if animate:
+		_panel_a.move_to(pos_a)
+		_panel_b.move_to(pos_b)
+	else:
+		_panel_a.snap_to(pos_a)
+		_panel_b.snap_to(pos_b)
 
+# Every cell at least PANEL_BORDER tiles from the room edges. Obstacles are
+# ignored on purpose: panels may sit inside walls/objects, and the list must stay
+# identical no matter what's in the room so placement is fully deterministic.
 func _get_valid_panel_positions() -> Array[Vector2i]:
 	var room := _get_home_room()
 	var rx0 := room.x * 25
 	var ry0 := room.y * 12
-	var border := ceili(96.0 / float(TILE_SIZE))
 	var result: Array[Vector2i] = []
-	for ty in range(ry0 + border, ry0 + 12 - border):
-		for tx in range(rx0 + border, rx0 + 25 - border):
-			var gp := Vector2i(tx, ty)
-			if not _main.is_blocked(gp):
-				result.append(gp)
+	for ty in range(ry0 + PANEL_BORDER, ry0 + 12 - PANEL_BORDER):
+		for tx in range(rx0 + PANEL_BORDER, rx0 + 25 - PANEL_BORDER):
+			result.append(Vector2i(tx, ty))
 	return result
 
-func _check_panels() -> void:
-	if _object_falling:
-		return
-	if not is_instance_valid(_panel_a) or not is_instance_valid(_panel_b):
-		return
-	if _panel_a._active and _panel_b._active:
-		_drop_object()
-
-func _drop_object() -> void:
-	_object_falling = true
-	_place_panels_randomly()
-	if is_instance_valid(_falling_obj):
-		_falling_obj.queue_free()
-	var obj := Sprite2D.new()
-	obj.texture = load("res://Sprites/player/stake.png")
-	obj.centered = false
-	var room := _get_home_room()
-	var ry0 := float(room.y * 12 * TILE_SIZE)
-	var boss_center := get_center()
-	obj.position = Vector2(boss_center.x - 8.0, ry0)
-	_main.wall_tilemap.add_child(obj)
-	_falling_obj = obj
-	var t := obj.create_tween()
-	t.tween_property(obj, "position:y", boss_center.y - 8.0, 0.45)
-	t.tween_callback(_on_object_landed.bind(obj))
-
-func _on_object_landed(obj: Node2D) -> void:
-	if is_instance_valid(obj):
-		obj.queue_free()
-	if _falling_obj == obj:
-		_falling_obj = null
-	_object_falling = false
-	if _dead:
-		return
-	hp -= 1
-	_main._trigger_shake(3.0)
-	Utils.shake_boss_health_bar(self)
-	if hp <= 0:
-		hp = 0
-		_boss_die()
+# Relocate the panels each time hp falls past the next 100-hp boundary.
+func _check_panel_threshold() -> void:
+	while hp <= _next_panel_hp and _next_panel_hp > 0:
+		_next_panel_hp -= PANEL_SWITCH_STEP
+		if is_instance_valid(_panel_a) and is_instance_valid(_panel_b):
+			_place_panels_randomly(true)
 
 # ── Main process ──────────────────────────────────────────────────────────────
 
@@ -194,7 +211,9 @@ func _process(delta: float) -> void:
 				_on_death_complete()
 		return
 
-	_check_panels()
+	_handle_beam()
+	if _dead:
+		return
 
 	var player: Node2D = _main.player
 	var target = player.get_body_center()
@@ -203,7 +222,6 @@ func _process(delta: float) -> void:
 		State.CHASE:            _process_chase(delta, target)
 		State.BIG_BOUNCE_WINDUP: _process_big_bounce_windup(delta, target)
 		State.BIG_BOUNCE:       _process_big_bounce(delta)
-		State.WOBBLE:           _process_wobble(delta)
 
 	_sync_sprite(delta)
 	_check_contact(player, target)
@@ -220,19 +238,6 @@ func _process_chase(delta: float, target: Vector2) -> void:
 		_wait_timer = 0.0
 		_path.clear()
 		return
-
-	if hp < BOSS_MAX_HP * 0.8:
-		_spawn_timer -= delta
-		if _spawn_timer <= 0.0:
-			var hp_ratio := float(hp) / float(BOSS_MAX_HP)
-			_spawn_timer = lerpf(SPAWN_INTERVAL_MIN, SPAWN_INTERVAL_MAX, clampf(hp_ratio / 0.8, 0.0, 1.0))
-			_state = State.WOBBLE
-			_state_timer = WOBBLE_DURATION
-			_pulse_time = 0.0
-			_hop_state = HopState.IDLE
-			_wait_timer = 0.0
-			_path.clear()
-			return
 
 	if _hop_state == HopState.IDLE:
 		_path_timer -= delta
@@ -287,43 +292,22 @@ func _process_big_bounce(delta: float) -> void:
 		position = _hop_to
 		_hop_state = HopState.IDLE
 		_state = State.CHASE
-		_wait_duration = WAIT_MIN
+		_wait_duration = WAIT_MIN * _wait_scale()
 		_wait_timer = _wait_duration
 		_big_bounce_timer = BIG_BOUNCE_INTERVAL
 		scale = Vector2(BOSS_SCALE * LANDING_SQUASH_X, BOSS_SCALE * LANDING_SQUASH_Y)
-
-# ── Wobble / spawn ────────────────────────────────────────────────────────────
-
-func _process_wobble(delta: float) -> void:
-	_state_timer -= delta
-	_pulse_time += delta
-	var wobble := sin(_pulse_time * TAU * 4.5) * 0.11
-	scale = Vector2(BOSS_SCALE * (1.0 + wobble), BOSS_SCALE * (1.0 - wobble))
-	if _state_timer <= 0.0:
-		scale = Vector2(BOSS_SCALE, BOSS_SCALE)
-		_spawn_bounce_enemies()
-		_state = State.CHASE
-
-func _spawn_bounce_enemies() -> void:
-	var player_center = _main.player.get_body_center()
-	var dirs := _CARDINALS.duplicate()
-	dirs.shuffle()
-	dirs.pop_back()
-	for d in dirs:
-		var spawn_pos = player_center + Vector2(float(d.x), float(d.y)) * SPAWN_DIST
-		var tile := Vector2i(floori(spawn_pos.x / TILE_SIZE), floori(spawn_pos.y / TILE_SIZE))
-		if _main.is_blocked(tile):
-			continue
-		var e := BounceEnemyScene.instantiate()
-		e.position = Vector2(float(tile.x) * TILE_SIZE, float(tile.y) * TILE_SIZE)
-		e.boss_spawned = true
-		_main.wall_tilemap.add_child(e)
+		_main._trigger_shake(LONG_JUMP_SHAKE)
 
 # ── Pathfinding ───────────────────────────────────────────────────────────────
 
 func _get_move_speed() -> float:
 	var hp_ratio := float(hp) / float(BOSS_MAX_HP)
 	return lerpf(MAX_MOVE_SPEED, BASE_MOVE_SPEED, hp_ratio)
+
+# Idle wait between hops shrinks as the boss speeds up — at 4x speed it pauses
+# only a quarter as long.
+func _wait_scale() -> float:
+	return BASE_MOVE_SPEED / _get_move_speed()
 
 func _recalc_path(target: Vector2) -> void:
 	var from := _world_to_grid(position)
@@ -336,7 +320,9 @@ func _begin_next_hop() -> void:
 	var from_gp := _world_to_grid(position)
 	var next_gp: Vector2i = _path[0]
 	var d := next_gp - from_gp
-	if absi(d.x) + absi(d.y) != 1:
+	var dist := absi(d.x) + absi(d.y)
+	var block_jump := dist == JUMP_TILES and (d.x == 0 or d.y == 0)
+	if dist != 1 and not block_jump:
 		_path.clear()
 		return
 	_path.pop_front()
@@ -344,8 +330,12 @@ func _begin_next_hop() -> void:
 	_hop_to = _grid_to_world(next_gp)
 	_hop_time = 0.0
 	_hop_t = 0.0
-	_hop_duration = HOP_DURATION
-	_hop_height = HOP_HEIGHT
+	if block_jump:
+		_hop_duration = JUMP_HOP_DURATION
+		_hop_height = JUMP_HOP_HEIGHT
+	else:
+		_hop_duration = HOP_DURATION
+		_hop_height = HOP_HEIGHT
 	_hop_state = HopState.HOP
 
 func _process_hop(delta: float) -> void:
@@ -360,11 +350,13 @@ func _process_hop(delta: float) -> void:
 	if _hop_t >= 1.0:
 		position = _hop_to
 		_hop_state = HopState.IDLE
-		_wait_duration = randf_range(WAIT_MIN, WAIT_MAX)
+		_wait_duration = randf_range(WAIT_MIN, WAIT_MAX) * _wait_scale()
 		_wait_timer = _wait_duration
 		scale = Vector2(BOSS_SCALE * LANDING_SQUASH_X, BOSS_SCALE * LANDING_SQUASH_Y)
+		_main._trigger_shake(LAND_SHAKE)
 
 func _find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
+	_blocked_cache.clear()
 	if from == to:
 		return []
 	var parents: Dictionary = {from: null}
@@ -394,14 +386,27 @@ func _path_neighbors(gp: Vector2i) -> Array[Vector2i]:
 		var step := gp + d
 		if _is_walkable_boss(step):
 			result.append(step)
+		elif _is_walkable_boss(gp + d * JUMP_TILES):
+			# Step is blocked but there's clear ground beyond a single block —
+			# the boss can leap over it.
+			result.append(gp + d * JUMP_TILES)
+	return result
+
+func _cell_blocked(gp: Vector2i) -> bool:
+	var cached: Variant = _blocked_cache.get(gp)
+	if cached != null:
+		return cached
+	var result = _main.is_blocked(gp)
+	_blocked_cache[gp] = result
 	return result
 
 func _is_walkable_boss(gp: Vector2i) -> bool:
-	for dy in 2:
-		for dx in 2:
-			if _main.is_blocked(gp + Vector2i(dx, dy)):
-				return false
-	return true
+	# The boss paths as a single 32x32 tile, clamped inside the home room.
+	if gp.x < _room_x0 or gp.x >= _room_x0 + 25:
+		return false
+	if gp.y < _room_y0 or gp.y >= _room_y0 + 12:
+		return false
+	return not _cell_blocked(gp)
 
 func _world_to_grid(pos: Vector2) -> Vector2i:
 	return Vector2i(floori(pos.x / TILE_SIZE), floori(pos.y / TILE_SIZE))
@@ -430,17 +435,43 @@ func _can_hurt_player() -> bool:
 	return _state != State.BIG_BOUNCE
 
 func _check_contact(player: Node2D, target: Vector2) -> void:
-	if _state == State.DYING or _state == State.WOBBLE:
+	if _state == State.DYING:
 		return
 	if not _can_hurt_player():
 		return
 	if not player.movement_locked and (target - get_center()).length() < BOSS_CONTACT_DIST:
 		_main._reset_room()
 
-# ── Beam override ─────────────────────────────────────────────────────────────
+# ── Wind damage ───────────────────────────────────────────────────────────────
 
+# The boss is immune to the electric beam; it only takes damage from fan wind,
+# the same way the bounce enemies do.
 func _handle_beam() -> void:
-	pass
+	if _dead:
+		return
+	for fan in get_tree().get_nodes_in_group("fans"):
+		if fan.is_active() and _fan_hits_boss(fan):
+			hp -= 1
+			_main._trigger_shake(2.0)
+			Utils.shake_boss_health_bar(self)
+			_check_panel_threshold()
+			if hp <= 0:
+				hp = 0
+				_boss_die()
+			return
+
+# The boss is hit if any tile of its 2x2 footprint sits in the fan's airflow, a
+# much larger wind hitbox than a single center-point check.
+func _fan_hits_boss(fan) -> bool:
+	var gp := _world_to_grid(position)
+	for dy in 2:
+		for dx in 2:
+			var p := Vector2(
+				float(gp.x + dx) * TILE_SIZE + 16.0,
+				float(gp.y + dy) * TILE_SIZE + 16.0)
+			if fan.is_position_in_airflow(p):
+				return true
+	return false
 
 # ── Death ─────────────────────────────────────────────────────────────────────
 
@@ -455,18 +486,6 @@ func _boss_die() -> void:
 	_do_death_shakes()
 	if _death_tween:
 		_death_tween.kill()
-	var home := _get_home_room()
-	var rx0 := home.x * 25
-	var ry0 := home.y * 12
-	for e in get_tree().get_nodes_in_group("bounce_enemies"):
-		if not is_instance_valid(e):
-			continue
-		var ep = e.get("boss_spawned")
-		if not ep:
-			continue
-		var egp := Vector2i(floori(e._start_pos.x / TILE_SIZE), floori(e._start_pos.y / TILE_SIZE))
-		if egp.x >= rx0 and egp.x < rx0 + 25 and egp.y >= ry0 and egp.y < ry0 + 12:
-			e.queue_free()
 	_death_tween = create_tween()
 	_death_tween.tween_callback(_launch_death_arc).set_delay(1.5)
 
@@ -498,9 +517,7 @@ func _on_death_complete() -> void:
 	_sprite.visible = false
 	_particles.restart()
 	scale = Vector2(BOSS_SCALE, BOSS_SCALE)
-	for door in get_tree().get_nodes_in_group("boss_doors"):
-		if is_instance_valid(door):
-			door.open()
+	# Boss doors open themselves once their room has no living boss (see BossDoor).
 
 # ── Reset ─────────────────────────────────────────────────────────────────────
 
@@ -520,18 +537,17 @@ func reset() -> void:
 	_wait_timer = 0.0
 	_wait_duration = 0.0
 	_big_bounce_timer = BIG_BOUNCE_INTERVAL
-	_spawn_timer = SPAWN_INTERVAL_MAX
 	_pulse_time = 0.0
 	_arc_started = false
-	_object_falling = false
+	_next_panel_hp = BOSS_MAX_HP - PANEL_SWITCH_STEP
+	# Re-seed so panel placement repeats identically every reset.
+	_panel_rng.seed = PANEL_RNG_SEED
+	_panel_place_count = 0
 	scale = Vector2(BOSS_SCALE, BOSS_SCALE)
 	rotation = 0.0
 	z_index = SORT_Z
-	if is_instance_valid(_falling_obj):
-		_falling_obj.queue_free()
-		_falling_obj = null
 	if is_instance_valid(_panel_a) and is_instance_valid(_panel_b):
-		_place_panels_randomly()
+		_place_panels_randomly(false)
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0

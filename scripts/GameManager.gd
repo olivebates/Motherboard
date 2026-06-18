@@ -33,6 +33,9 @@ func register_floor_panel(grid_pos: Vector2i, id: String, id2: String = "") -> v
 		ids.append(id2)
 	floor_panels[grid_pos] = ids
 
+func unregister_floor_panel(grid_pos: Vector2i) -> void:
+	floor_panels.erase(grid_pos)
+
 func register_door(door_node: Node, id: String) -> void:
 	if not doors.has(id):
 		doors[id] = []

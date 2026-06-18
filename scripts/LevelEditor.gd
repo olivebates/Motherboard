@@ -39,6 +39,7 @@ const SCENE_MAP = {
 	"WaterEnemy":       "res://scenes/enemies/WaterEnemy.tscn",
 	"BounceEnemy":      "res://scenes/enemies/BounceEnemy.tscn",
 	"SpiderEnemy":      "res://scenes/enemies/SpiderEnemy.tscn",
+	"ExitPoint":        "res://scenes/objects/ExitPoint.tscn",
 }
 
 const PALETTE_SPRITES = {
@@ -50,10 +51,10 @@ const PALETTE_SPRITES = {
 	"Screw":            "res://Sprites/objects/screw.png",
 	"PassBlock":        "res://Sprites/objects/switch_open2.png",
 	"LightningBlocker": "res://Sprites/objects/resistor_small.png",
-	"Door":             "res://Sprites/objects/switch_closed.png",
+	"Door":             "res://Sprites/objects/door.webp",
 	"FloorPanel":       "res://Sprites/objects/positive.png",
 	"FloorPanelNeg":    "res://Sprites/objects/negative.png",
-	"KeyDoor":          "res://Sprites/objects/locked_door1.png",
+	"KeyDoor":          "res://Sprites/objects/KeyDoor.webp",
 	"Key":              "res://Sprites/objects/Key_File.webp",
 	"FanRight":         "res://Sprites/objects/Fan_Right.png",
 	"FanLeft":          "res://Sprites/objects/Fan_Left.png",
@@ -64,9 +65,11 @@ const PALETTE_SPRITES = {
 	"DustPile":         "res://Sprites/objects/Dust_Pile_Alternate.png",
 	"BreakableWall":    "res://Sprites/objects/wall_breakable.png",
 	"KeyBreakableWall": "res://Sprites/objects/wall_breakable.png",
+	"KeyDustPile":      "res://Sprites/objects/Dust_Pile_Alternate.png",
 	"WaterEnemy":       "res://Sprites/enemies/Front_Idle1.png",
-	"BounceEnemy":      "res://Sprites/enemies/Front_Idle1.png",
-	"SpiderEnemy":      "res://Sprites/enemies/Front_Idle1.png",
+	"BounceEnemy":      "res://Sprites/enemies/BounceFront.png",
+	"SpiderEnemy":      "res://Sprites/enemies/spider_small.png",
+	"ExitPoint":        "res://Sprites/objects/teleport_closed.png",
 }
 
 # ──────────────────────────────────────────────
@@ -127,6 +130,21 @@ var _play_label: Label = null
 var _play_auto_save_data: Dictionary = {}
 
 var _music_btn: Button
+
+# Undo system
+var _undo_stack: Array = []
+const MAX_UNDO = 50
+var _drag_undo_batch: Array = []
+var _batching_undo: bool = false
+
+# Object dragging in BUILD mode
+var _obj_drag_node: Node = null
+var _obj_drag_start_gp: Vector2i = Vector2i.ZERO
+var _obj_drag_active: bool = false
+var _obj_drag_is_wall: bool = false
+
+# Playtest "SPACE" prompt shown above the player while on an open ExitPoint
+var _space_label: Label = null
 
 # ──────────────────────────────────────────────
 #  Wire mode
@@ -204,6 +222,16 @@ func _setup_play_label() -> void:
 	_play_label.offset_bottom = -8
 	editor_ui.add_child(_play_label)
 
+	# "SPACE" prompt above the player while standing on an open ExitPoint
+	_space_label = Label.new()
+	_space_label.text = "SPACE"
+	_space_label.visible = false
+	_space_label.add_theme_color_override("font_color", Color.WHITE)
+	_space_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_space_label.add_theme_constant_override("outline_size", 2)
+	_space_label.add_theme_font_size_override("font_size", 11)
+	editor_ui.add_child(_space_label)
+
 func _ready() -> void:
 	AudioManager.set_music("LevelEditor")
 	_setup_mute_button()
@@ -267,27 +295,35 @@ func _build_palette() -> void:
 	_palette_buttons.clear()
 
 	var scene_keys = SCENE_MAP.keys()
+	scene_keys.erase("ExitPoint")  # placed manually right after Player
 	var bw_idx = scene_keys.find("BreakableWall")
 	if bw_idx >= 0:
 		scene_keys.insert(bw_idx + 1, "KeyBreakableWall")
 	else:
 		scene_keys.append("KeyBreakableWall")
-	var types = ["Wires", "Wall", "Player"] + scene_keys
+	var dp_idx = scene_keys.find("DustPile")
+	if dp_idx >= 0:
+		scene_keys.insert(dp_idx + 1, "KeyDustPile")
+	else:
+		scene_keys.append("KeyDustPile")
+	var types = ["Wires", "Wall", "Player", "ExitPoint"] + scene_keys
 	palette_list.columns = 22
 
 	for t in types:
-		if t == "KeyBreakableWall":
+		if t == "KeyBreakableWall" or t == "KeyDustPile":
+			# Two-layer icon: the destructible base with a faded key on top.
+			var base_path = PALETTE_SPRITES["BreakableWall"] if t == "KeyBreakableWall" else PALETTE_SPRITES["DustPile"]
 			var container = Button.new()
 			container.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
 			container.tooltip_text = t
 			container.flat = false
 			container.pressed.connect(func(): _select_type(t))
-			var wall_rect = TextureRect.new()
-			wall_rect.texture = _first_frame_texture("res://Sprites/objects/wall_breakable.png")
-			wall_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			wall_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			wall_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-			wall_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			var base_rect = TextureRect.new()
+			base_rect.texture = _first_frame_texture(base_path)
+			base_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			base_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			base_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			base_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			var key_rect = TextureRect.new()
 			key_rect.texture = _first_frame_texture("res://Sprites/objects/Key_File.webp")
 			key_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -295,10 +331,54 @@ func _build_palette() -> void:
 			key_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 			key_rect.modulate = Color(1, 1, 1, 0.5)
 			key_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			container.add_child(wall_rect)
+			container.add_child(base_rect)
 			container.add_child(key_rect)
 			palette_list.add_child(container)
 			_palette_buttons[t] = container
+		elif t == "KeyDoor":
+			var kd_container = Button.new()
+			kd_container.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
+			kd_container.clip_contents = true
+			kd_container.tooltip_text = t
+			kd_container.flat = false
+			kd_container.pressed.connect(func(): _select_type(t))
+			var kd_raw = load(PALETTE_SPRITES["KeyDoor"]) as Texture2D
+			var kd_atlas = AtlasTexture.new()
+			kd_atlas.atlas = kd_raw
+			kd_atlas.region = Rect2(0, 0, 32, 42)
+			var kd_rect = TextureRect.new()
+			kd_rect.texture = kd_atlas
+			kd_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			kd_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			kd_rect.anchor_left = 0.0
+			kd_rect.anchor_right = 1.0
+			kd_rect.anchor_top = 1.0
+			kd_rect.anchor_bottom = 1.0
+			kd_rect.offset_top = -42
+			kd_rect.offset_bottom = 0
+			kd_rect.offset_left = 0
+			kd_rect.offset_right = 0
+			kd_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			kd_container.add_child(kd_rect)
+			palette_list.add_child(kd_container)
+			_palette_buttons[t] = kd_container
+		elif t == "BounceEnemy":
+			# 64×64 sprite shown bottom-center anchored, scaled to fit the cell
+			var be_container = Button.new()
+			be_container.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
+			be_container.clip_contents = true
+			be_container.tooltip_text = t
+			be_container.flat = false
+			be_container.pressed.connect(func(): _select_type(t))
+			var be_rect = TextureRect.new()
+			be_rect.texture = load(PALETTE_SPRITES["BounceEnemy"]) as Texture2D
+			be_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			be_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			be_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			be_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			be_container.add_child(be_rect)
+			palette_list.add_child(be_container)
+			_palette_buttons[t] = be_container
 		else:
 			var btn = TextureButton.new()
 			btn.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
@@ -308,6 +388,10 @@ func _build_palette() -> void:
 				btn.texture_normal = _first_frame_texture(PALETTE_SPRITES[t])
 			btn.tooltip_text = t
 			btn.pressed.connect(func(): _select_type(t))
+			if t == "SpiderEnemy":
+				var img = load(PALETTE_SPRITES["SpiderEnemy"]).get_image()
+				img.rotate_90(CLOCKWISE)
+				btn.texture_normal = ImageTexture.create_from_image(img)
 			palette_list.add_child(btn)
 			_palette_buttons[t] = btn
 
@@ -324,8 +408,8 @@ func _highlight_palette(t: String) -> void:
 	for type in _palette_buttons:
 		var btn = _palette_buttons[type]
 		var tint = Color(0.4, 0.85, 1.0) if type == t else Color(1, 1, 1)
-		if type == "KeyBreakableWall":
-			# Only tint the wall layer; key layer keeps its 50% alpha
+		if type == "KeyBreakableWall" or type == "KeyDustPile":
+			# Only tint the base layer; key layer keeps its 50% alpha
 			if btn.get_child_count() > 0:
 				btn.get_child(0).modulate = tint
 		else:
@@ -353,6 +437,14 @@ func _set_mode(new_mode: int) -> void:
 	_drag_deleting = false
 	_floor_paint_batch.clear()
 	_floor_erase_batch.clear()
+	if _obj_drag_node != null and is_instance_valid(_obj_drag_node):
+		_obj_drag_node.visible = true
+	if _obj_drag_is_wall and _obj_drag_active:
+		# Restore a wall whose drag was interrupted by a mode switch
+		walls_tilemap.set_cell(_obj_drag_start_gp, WALL_SOURCE_ID, Vector2i(0, 0))
+	_obj_drag_node = null
+	_obj_drag_is_wall = false
+	_obj_drag_active = false
 
 	match mode:
 		Mode.BUILD:
@@ -393,6 +485,13 @@ func _process(_delta: float) -> void:
 	if _wire_mode and mode != Mode.PLAY:
 		grid_overlay.queue_redraw()
 
+	_update_space_label()
+
+	# Object/wall drag (BUILD or PLACING mode)
+	if (mode == Mode.BUILD or mode == Mode.PLACING) and _is_dragging():
+		_process_obj_drag()
+		return
+
 	if mode != Mode.PLACING:
 		ghost_sprite.visible = false
 		return
@@ -403,26 +502,11 @@ func _process(_delta: float) -> void:
 	ghost_sprite.visible = in_bounds and selected_type != "Wires"
 
 	if in_bounds:
-		ghost_sprite.position = grid_to_world(gp)
+		ghost_sprite.position = _ghost_position_for(selected_type, gp)
 
 		if _ghost_tex_type != selected_type:
 			_ghost_tex_type = selected_type
-			var tex_path = PALETTE_SPRITES.get(selected_type, "")
-			if tex_path != "":
-				var raw_tex = load(tex_path) as Texture2D
-				var gw = raw_tex.get_width()
-				var gh = raw_tex.get_height()
-				if gw > 32 or gh > 32:
-					ghost_sprite.region_enabled = true
-					ghost_sprite.region_rect = Rect2(0, 0, 32, 32)
-					ghost_sprite.texture = raw_tex
-					ghost_sprite.scale = Vector2.ONE
-				else:
-					ghost_sprite.region_enabled = false
-					ghost_sprite.texture = raw_tex
-					ghost_sprite.scale = Vector2(TILE_SIZE / float(gw), TILE_SIZE / float(gh))
-			else:
-				ghost_sprite.texture = null
+			_apply_ghost_texture(selected_type)
 
 	if _drag_placing or _drag_deleting:
 		_handle_drag_at(gp)
@@ -449,7 +533,12 @@ func _input(event: InputEvent) -> void:
 				_toggle_wire_mode()
 				get_viewport().set_input_as_handled()
 		KEY_SPACE:
-			if mode != Mode.PLAY:
+			if mode == Mode.PLAY:
+				# Standing on an open ExitPoint ends the playtest
+				if _player_on_exit_point():
+					_exit_play_mode()
+					get_viewport().set_input_as_handled()
+			else:
 				if _wire_mode:
 					_cycle_wire_color()
 				else:
@@ -462,6 +551,14 @@ func _input(event: InputEvent) -> void:
 				else:
 					_set_mode(Mode.BUILD)
 				get_viewport().set_input_as_handled()
+		KEY_Z:
+			if mode != Mode.PLAY:
+				_undo_last_action()
+				get_viewport().set_input_as_handled()
+		KEY_F:
+			if mode != Mode.PLAY:
+				_eyedropper_at(world_to_grid(get_global_mouse_position()))
+				get_viewport().set_input_as_handled()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if mode == Mode.PLAY:
@@ -470,6 +567,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	var mb = event as InputEventMouseButton
+
+	# Middle mouse = eyedropper: pick the type under the cursor and enter placement
+	if mb.button_index == MOUSE_BUTTON_MIDDLE and mb.pressed:
+		_eyedropper_at(world_to_grid(get_global_mouse_position()))
+		return
 
 	if _wire_mode:
 		var gp = world_to_grid(get_global_mouse_position())
@@ -486,25 +588,38 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if mode == Mode.PLACING:
+		var pgp = world_to_grid(get_global_mouse_position())
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
+				# Clicking an existing object/wall starts a drag-move instead of placing
+				if selected_type != "Wires" and _try_start_drag(pgp):
+					return
+				_drag_deleting = false  # cancel any stuck delete drag
 				_drag_placing = true
 				_drag_visited.clear()
+				_begin_drag_undo_batch()
 			else:
+				if _is_dragging():
+					_finalize_obj_drag()
+					return
 				_drag_placing = false
+				_commit_drag_undo_batch()
 				_flush_floor_batches()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:
 			if mb.pressed:
+				_drag_placing = false  # cancel any stuck place drag
 				_drag_deleting = true
+				_begin_drag_undo_batch()
 			else:
 				_drag_deleting = false
+				_commit_drag_undo_batch()
 				_flush_floor_batches()
 
 	match mode:
 		Mode.BUILD:
 			_handle_build_click(mb)
 		Mode.PLACING:
-			if mb.pressed:
+			if mb.pressed and not _is_dragging():
 				var gp = world_to_grid(get_global_mouse_position())
 				_handle_drag_at(gp)
 
@@ -542,42 +657,54 @@ func _handle_drag_at(gp: Vector2i) -> void:
 		if placing_wall:
 			_place_wall(gp)
 		else:
+			# Objects drag-paint once per empty tile; _place_object skips occupied tiles
 			_place_object(selected_type, gp)
 	elif _drag_deleting:
-		if placing_wall:
+		# Delete whatever is at the cell, regardless of the selected tool:
+		# objects first, then walls, then the player spawn marker
+		var existing = _object_at(gp)
+		if existing:
+			_delete_object(existing)
+		elif walls_tilemap.get_cell_source_id(gp) >= 0:
 			walls_tilemap.erase_cell(gp)
-		else:
-			var existing = _object_at(gp)
-			if existing:
-				_delete_object(existing)
-			if selected_type == "Player" and player_spawn_pos == gp:
-				player_spawn_pos = Vector2i(-1, -1)
-				player_marker.visible = false
+			_push_undo({"kind": "wall", "col": gp.x, "row": gp.y, "placed": false})
+		elif player_spawn_pos == gp:
+			player_spawn_pos = Vector2i(-1, -1)
+			player_marker.visible = false
 
 func _handle_build_click(mb: InputEventMouseButton) -> void:
+	# Finalize drag on left release (allow outside bounds)
+	if not mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+		if _is_dragging():
+			_finalize_obj_drag()
+		return
+
 	var world_pos = get_global_mouse_position()
 	var gp = world_to_grid(world_pos)
 	if gp.x < 0 or gp.x >= ROOM_COLS or gp.y < 0 or gp.y >= ROOM_ROWS:
 		return
 	if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
-		if placing_wall:
-			_place_wall(gp)
-		else:
-			var existing = _object_at(gp)
-			if existing:
-				_select_object(existing)
-			else:
-				_place_object(selected_type, gp)
+		# Clicking an existing object/wall starts a potential drag-move
+		if _try_start_drag(gp):
+			return
+		# Empty cell: seamlessly switch into placement mode
+		_enter_placing_from_build(false, gp)
 	elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
-		if placing_wall:
-			walls_tilemap.erase_cell(gp)
-		else:
-			var existing = _object_at(gp)
-			if existing:
-				_delete_object(existing)
-			if player_spawn_pos == gp:
-				player_spawn_pos = Vector2i(-1, -1)
-				player_marker.visible = false
+		# Right-clicking seamlessly switches into placement mode (delete);
+		# this also deletes any object/wall already at the clicked cell
+		_enter_placing_from_build(true, gp)
+
+func _enter_placing_from_build(is_delete: bool, gp: Vector2i) -> void:
+	# Seamless transition from BUILD (select) mode into PLACING mode on grid click
+	_set_mode(Mode.PLACING)
+	_apply_floor_fade(selected_type == "Wires")
+	if is_delete:
+		_drag_deleting = true
+	else:
+		_drag_placing = true
+		_drag_visited.clear()
+	_begin_drag_undo_batch()
+	_handle_drag_at(gp)
 
 # ──────────────────────────────────────────────
 #  Object / tile placement
@@ -604,15 +731,23 @@ func _type_of(node: Node) -> String:
 func _place_wall(gp: Vector2i) -> void:
 	if gp.x < -1 or gp.x >= ROOM_COLS or gp.y < -1 or gp.y >= ROOM_ROWS:
 		return
+	var was_present = walls_tilemap.get_cell_source_id(gp) >= 0
 	walls_tilemap.set_cell(gp, WALL_SOURCE_ID, Vector2i(0, 0))
+	if not was_present:
+		_push_undo({"kind": "wall", "col": gp.x, "row": gp.y, "placed": true})
 
 func _place_object(type: String, gp: Vector2i) -> void:
 	if type == "Player":
 		if gp.x < 0 or gp.x >= PLAY_COLS or gp.y < 0 or gp.y >= PLAY_ROWS:
 			return
+		if walls_tilemap.get_cell_source_id(gp) >= 0 or border_walls_tilemap.get_cell_source_id(gp) >= 0:
+			return
+		var prev = player_spawn_pos
 		player_spawn_pos = gp
 		player_marker.position = grid_to_world(gp)
 		player_marker.visible = true
+		_push_undo({"kind": "player_spawn", "new_col": gp.x, "new_row": gp.y,
+					"prev_col": prev.x, "prev_row": prev.y})
 		return
 
 	if type == "KeyBreakableWall":
@@ -620,15 +755,23 @@ func _place_object(type: String, gp: Vector2i) -> void:
 		_place_object("Key", gp)
 		return
 
+	if type == "KeyDustPile":
+		_place_object("DustPile", gp)
+		_place_object("Key", gp)
+		return
+
 	if gp.x < 0 or gp.x >= PLAY_COLS or gp.y < 0 or gp.y >= PLAY_ROWS:
 		return
 	if not SCENE_MAP.has(type):
 		return
+	# Objects cannot be placed on top of walls
+	if walls_tilemap.get_cell_source_id(gp) >= 0 or border_walls_tilemap.get_cell_source_id(gp) >= 0:
+		return
 
 	var existing = _object_at(gp)
 	if existing != null:
-		# Only allow Key on top of BreakableWall
-		if not (type == "Key" and _type_of(existing) == "BreakableWall"):
+		# Only allow Key on top of a destructible (BreakableWall or DustPile)
+		if not (type == "Key" and _type_of(existing) in ["BreakableWall", "DustPile"]):
 			return
 
 	var inst = load(SCENE_MAP[type]).instantiate()
@@ -638,6 +781,9 @@ func _place_object(type: String, gp: Vector2i) -> void:
 		inst.positive = false
 
 	y_sort_root.add_child(inst)
+
+	# Make PassBlock visible in editor so designers can see placements
+	_make_passblock_visible(inst, type)
 
 	# Must be after add_child: Key._ready() resets z_index to -5
 	if type == "Key" and existing != null:
@@ -650,8 +796,9 @@ func _place_object(type: String, gp: Vector2i) -> void:
 		inst._keys_total = 1
 
 	placed_objects.append({ "node": inst, "type": type, "col": gp.x, "row": gp.y })
+	_push_undo({"kind": "place_obj", "node": inst, "type": type, "col": gp.x, "row": gp.y})
 
-func _delete_object(node: Node) -> void:
+func _delete_object_no_undo(node: Node) -> void:
 	_wire_assignments.erase(node)
 	for i in range(placed_objects.size() - 1, -1, -1):
 		if placed_objects[i].node == node:
@@ -661,6 +808,24 @@ func _delete_object(node: Node) -> void:
 		selected_object = null
 		props_panel.visible = false
 	node.queue_free()
+
+func _delete_object(node: Node) -> void:
+	var type = _type_of(node)
+	var col = -1
+	var row = -1
+	for e in placed_objects:
+		if e.node == node:
+			col = e.col
+			row = e.row
+			break
+	var id_val = node.get("id") if node.get("id") != null else ""
+	var id2_val = node.get("id2") if node.get("id2") != null else ""
+	var positive_val = node.get("positive") if node.get("positive") != null else true
+	var wire_val = _wire_assignments.get(node, -1)
+	_delete_object_no_undo(node)
+	if type != "" and col >= 0:
+		_push_undo({"kind": "delete_obj", "obj_type": type, "col": col, "row": row,
+					"id": id_val, "id2": id2_val, "positive": positive_val, "wire": wire_val})
 
 # ──────────────────────────────────────────────
 #  Selection & properties panel
@@ -676,12 +841,6 @@ func _rebuild_props() -> void:
 		child.queue_free()
 	if selected_object == null:
 		return
-	var type = ""
-	for entry in placed_objects:
-		if entry.node == selected_object:
-			type = entry.type
-			break
-	_add_prop_label("Type: " + type)
 	if selected_object.get("id") != null:
 		_add_prop_field("id", selected_object.id, func(v): selected_object.id = v)
 	if selected_object.get("id2") != null:
@@ -725,6 +884,8 @@ func _restore_objects() -> void:
 			node.reset()
 		else:
 			node.position = grid_to_world(Vector2i(entry.col, entry.row))
+		# Restore PassBlock visibility for editor view
+		_make_passblock_visible(node, entry.type)
 		# Restore Key-on-BreakableWall transparency
 		if entry.type == "Key":
 			var others = []
@@ -779,6 +940,9 @@ func _apply_level_data(data: Dictionary) -> void:
 	player_marker.visible = false
 	selected_object = null
 	props_panel.visible = false
+	_undo_stack.clear()
+	_drag_undo_batch.clear()
+	_batching_undo = false
 
 	if data.has("player_spawn"):
 		player_spawn_pos = Vector2i(data.player_spawn.col, data.player_spawn.row)
@@ -808,6 +972,7 @@ func _apply_level_data(data: Dictionary) -> void:
 			if inst.get("id2") != null and obj.has("id2"): inst.id2 = obj.id2
 			if inst.get("positive") != null and obj.has("positive"): inst.positive = obj.positive
 			y_sort_root.add_child(inst)
+			_make_passblock_visible(inst, obj.type)
 			placed_objects.append({ "node": inst, "type": obj.type, "col": obj.col, "row": obj.row })
 
 	# Restore Key-on-BreakableWall visuals (must be after add_child so _ready has run)
@@ -1045,6 +1210,9 @@ func _is_static_solid(gp: Vector2i) -> bool:
 	for edoor in get_tree().get_nodes_in_group("enemy_doors"):
 		if not edoor.is_open and edoor.get_grid_pos() == gp:
 			return true
+	for ep in get_tree().get_nodes_in_group("exit_points"):
+		if not ep.is_open and ep.get_grid_pos() == gp:
+			return true
 	return false
 
 func get_player_blocking_rects(area: Rect2) -> Array[Rect2]:
@@ -1105,6 +1273,7 @@ func get_push_block_at_face(player_rect: Rect2, dir: Vector2i, from_point: Vecto
 func check_room_transition(_player_grid: Vector2i, _player_pixel: Vector2 = Vector2.ZERO) -> void: pass
 func _trigger_shake(_strength: float) -> void: pass
 func shoot_door_ball(_from: Vector2, _to: Vector2, callback: Callable) -> void: callback.call()
+func record_push(_block, _from_pos: Vector2i, _dir: Vector2i) -> void: pass
 
 class _PlayerStub extends Node2D:
 	func get_body_center() -> Vector2:
@@ -1202,6 +1371,34 @@ func _exit_play_mode() -> void:
 
 	player_marker.visible = player_spawn_pos != Vector2i(-1, -1)
 	_set_mode(Mode.BUILD)
+
+func _player_on_exit_point() -> bool:
+	if _play_player == null or not is_instance_valid(_play_player):
+		return false
+	for ep in get_tree().get_nodes_in_group("exit_points"):
+		if ep.is_player_standing_on(_play_player):
+			return true
+	return false
+
+func _update_space_label() -> void:
+	if _space_label == null:
+		return
+	var show = mode == Mode.PLAY and _player_on_exit_point()
+	_space_label.visible = show
+	if show:
+		var p = _play_player
+		# Sit above the player sprite top, matching the teleport "TAB" prompt
+		var world_pos = Vector2(p.visual_pos.x, p.visual_pos.y - 16.0 - 14.0)
+		var screen_pos = world_pos - camera.position - camera.offset + Vector2(400.0, 192.0)
+		_space_label.position = screen_pos - Vector2(_space_label.size.x * 0.5, 0.0)
+
+func _eyedropper_at(gp: Vector2i) -> void:
+	# Pick the type under the cursor and switch into placement mode with it selected
+	var obj = _object_at(gp)
+	if obj != null:
+		_select_type(_type_of(obj))
+	elif walls_tilemap.get_cell_source_id(gp) >= 0:
+		_select_type("Wall")
 
 func spawn_prong(pixel_pos: Vector2) -> void:
 	AudioManager.play_sfx("plant_stake")
@@ -1429,3 +1626,253 @@ func _segment_intersects_rect(a: Vector2, b: Vector2, rect: Rect2) -> bool:
 		if Geometry2D.segment_intersects_segment(a, b, c[i], c[(i + 1) % 4]) != null:
 			return true
 	return false
+
+# ──────────────────────────────────────────────
+#  Undo system
+# ──────────────────────────────────────────────
+func _push_undo(entry: Dictionary) -> void:
+	if _batching_undo:
+		_drag_undo_batch.append(entry)
+	else:
+		_undo_stack.append(entry)
+		if _undo_stack.size() > MAX_UNDO:
+			_undo_stack.pop_front()
+
+func _begin_drag_undo_batch() -> void:
+	_batching_undo = true
+	_drag_undo_batch.clear()
+
+func _commit_drag_undo_batch() -> void:
+	_batching_undo = false
+	if not _drag_undo_batch.is_empty():
+		_undo_stack.append({"kind": "batch", "entries": _drag_undo_batch.duplicate()})
+		if _undo_stack.size() > MAX_UNDO:
+			_undo_stack.pop_front()
+	_drag_undo_batch.clear()
+
+func _undo_last_action() -> void:
+	if _undo_stack.is_empty():
+		return
+	var entry = _undo_stack.pop_back()
+	_apply_undo_entry(entry)
+
+func _apply_undo_entry(entry: Dictionary) -> void:
+	match entry.kind:
+		"wall":
+			var gp = Vector2i(entry.col, entry.row)
+			if entry.placed:
+				walls_tilemap.erase_cell(gp)
+			else:
+				walls_tilemap.set_cell(gp, WALL_SOURCE_ID, Vector2i(0, 0))
+		"place_obj":
+			if is_instance_valid(entry.node):
+				_delete_object_no_undo(entry.node)
+		"delete_obj":
+			if not SCENE_MAP.has(entry.obj_type):
+				return
+			var gp = Vector2i(entry.col, entry.row)
+			var inst = load(SCENE_MAP[entry.obj_type]).instantiate()
+			inst.position = grid_to_world(gp)
+			if entry.obj_type == "FloorPanelNeg" and inst.get("positive") != null:
+				inst.positive = false
+			if inst.get("id") != null and entry.id != "": inst.id = entry.id
+			if inst.get("id2") != null and entry.id2 != "": inst.id2 = entry.id2
+			if inst.get("positive") != null: inst.positive = entry.positive
+			y_sort_root.add_child(inst)
+			_make_passblock_visible(inst, entry.obj_type)
+			if entry.obj_type == "KeyDoor":
+				inst._keys_total = 1
+			placed_objects.append({"node": inst, "type": entry.obj_type, "col": entry.col, "row": entry.row})
+			if entry.wire >= 0:
+				_wire_assignments[inst] = entry.wire
+		"player_spawn":
+			if entry.prev_col == -1:
+				player_spawn_pos = Vector2i(-1, -1)
+				player_marker.visible = false
+			else:
+				player_spawn_pos = Vector2i(entry.prev_col, entry.prev_row)
+				player_marker.position = grid_to_world(player_spawn_pos)
+				player_marker.visible = true
+		"move_obj":
+			if is_instance_valid(entry.node):
+				_move_object_to(entry.node, Vector2i(entry.from_col, entry.from_row), false)
+		"batch":
+			for i in range(entry.entries.size() - 1, -1, -1):
+				_apply_undo_entry(entry.entries[i])
+
+# ──────────────────────────────────────────────
+#  Object / wall dragging (BUILD or PLACING mode)
+# ──────────────────────────────────────────────
+func _is_dragging() -> bool:
+	return _obj_drag_node != null or _obj_drag_is_wall
+
+func _try_start_drag(gp: Vector2i) -> bool:
+	# Begin dragging an existing object (preferred) or wall at gp. Returns true if started.
+	var obj = _object_at(gp)
+	if obj != null:
+		_obj_drag_node = obj
+		_obj_drag_is_wall = false
+		_obj_drag_start_gp = gp
+		_obj_drag_active = false
+		_ghost_tex_type = ""
+		return true
+	if walls_tilemap.get_cell_source_id(gp) >= 0:
+		_obj_drag_node = null
+		_obj_drag_is_wall = true
+		_obj_drag_start_gp = gp
+		_obj_drag_active = false
+		_ghost_tex_type = ""
+		return true
+	return false
+
+func _process_obj_drag() -> void:
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		# Released outside window or canvas — finalize
+		_finalize_obj_drag()
+		return
+	var world_pos = get_global_mouse_position()
+	var gp = world_to_grid(world_pos)
+	if gp != _obj_drag_start_gp:
+		_obj_drag_active = true
+	if _obj_drag_active:
+		var drag_type = "Wall" if _obj_drag_is_wall else _type_of(_obj_drag_node)
+		var in_bounds: bool
+		if _obj_drag_is_wall:
+			# Hide the original wall cell so only the ghost shows
+			walls_tilemap.erase_cell(_obj_drag_start_gp)
+			in_bounds = gp.x >= -1 and gp.x < ROOM_COLS and gp.y >= -1 and gp.y < ROOM_ROWS
+		else:
+			# Hide the real object so only the grid-snapped ghost is visible
+			_obj_drag_node.visible = false
+			in_bounds = gp.x >= 0 and gp.x < PLAY_COLS and gp.y >= 0 and gp.y < PLAY_ROWS
+		ghost_sprite.visible = in_bounds
+		if in_bounds:
+			ghost_sprite.position = _ghost_position_for(drag_type, gp)
+		if drag_type != "" and drag_type != _ghost_tex_type:
+			_ghost_tex_type = drag_type
+			_apply_ghost_texture_to(ghost_sprite, drag_type)
+
+func _finalize_obj_drag() -> void:
+	ghost_sprite.visible = false
+	_ghost_tex_type = ""
+	if _obj_drag_is_wall:
+		var start = _obj_drag_start_gp
+		if _obj_drag_active:
+			var gp = world_to_grid(get_global_mouse_position())
+			var in_bounds = gp.x >= -1 and gp.x < ROOM_COLS and gp.y >= -1 and gp.y < ROOM_ROWS
+			var free = _object_at(gp) == null and walls_tilemap.get_cell_source_id(gp) < 0
+			if gp != start and in_bounds and free:
+				# Original cell was erased during drag; record the move as a batch
+				_begin_drag_undo_batch()
+				_push_undo({"kind": "wall", "col": start.x, "row": start.y, "placed": false})
+				walls_tilemap.set_cell(gp, WALL_SOURCE_ID, Vector2i(0, 0))
+				_push_undo({"kind": "wall", "col": gp.x, "row": gp.y, "placed": true})
+				_commit_drag_undo_batch()
+			else:
+				# Invalid drop — restore the original wall cell
+				walls_tilemap.set_cell(start, WALL_SOURCE_ID, Vector2i(0, 0))
+	elif _obj_drag_node != null and is_instance_valid(_obj_drag_node):
+		# Restore the real object that was hidden during the drag
+		_obj_drag_node.visible = true
+		if _obj_drag_active:
+			var gp = world_to_grid(get_global_mouse_position())
+			if gp != _obj_drag_start_gp:
+				_move_object_to(_obj_drag_node, gp, true)
+			else:
+				_select_object(_obj_drag_node)
+		else:
+			_select_object(_obj_drag_node)
+	_obj_drag_node = null
+	_obj_drag_is_wall = false
+	_obj_drag_active = false
+
+func _move_object_to(node: Node, new_gp: Vector2i, push_to_undo: bool) -> void:
+	if new_gp.x < 0 or new_gp.x >= PLAY_COLS or new_gp.y < 0 or new_gp.y >= PLAY_ROWS:
+		return
+	# Cannot drop objects on top of walls
+	if walls_tilemap.get_cell_source_id(new_gp) >= 0 or border_walls_tilemap.get_cell_source_id(new_gp) >= 0:
+		return
+	var old_gp = Vector2i(-1, -1)
+	for entry in placed_objects:
+		if entry.node == node:
+			old_gp = Vector2i(entry.col, entry.row)
+			break
+	if old_gp.x < 0 or old_gp == new_gp:
+		return
+	# Check if destination is occupied (only allow Key on top of a destructible)
+	var existing = _object_at(new_gp)
+	if existing != null and existing != node:
+		var drag_type = _type_of(node)
+		var existing_type = _type_of(existing)
+		if not (drag_type == "Key" and existing_type in ["BreakableWall", "DustPile"]):
+			return
+	for entry in placed_objects:
+		if entry.node == node:
+			entry.col = new_gp.x
+			entry.row = new_gp.y
+			break
+	node.position = grid_to_world(new_gp)
+	if node.get("start_grid_pos") != null:
+		node.start_grid_pos = new_gp
+	if node.get("grid_pos") != null:
+		node.grid_pos = new_gp
+	if push_to_undo:
+		_push_undo({"kind": "move_obj", "node": node,
+					"from_col": old_gp.x, "from_row": old_gp.y,
+					"to_col": new_gp.x, "to_row": new_gp.y})
+
+# ──────────────────────────────────────────────
+#  PassBlock visibility helper
+# ──────────────────────────────────────────────
+func _make_passblock_visible(node: Node, type: String) -> void:
+	if type == "PassBlock" and node.has_node("Sprite2D"):
+		var spr = node.get_node("Sprite2D")
+		spr.visible = true
+		spr.modulate = Color(1, 1, 1, 0.6)
+
+# ──────────────────────────────────────────────
+#  Ghost sprite helpers
+# ──────────────────────────────────────────────
+func _apply_ghost_texture(type: String) -> void:
+	_apply_ghost_texture_to(ghost_sprite, type)
+
+func _apply_ghost_texture_to(spr: Sprite2D, type: String) -> void:
+	var tex_path = PALETTE_SPRITES.get(type, "")
+	if tex_path == "":
+		spr.texture = null
+		return
+	var raw_tex = load(tex_path) as Texture2D
+	var gw = raw_tex.get_width()
+	var gh = raw_tex.get_height()
+	if type == "KeyDoor":
+		# Show the full 32×42 first frame, bottom-anchored
+		spr.region_enabled = true
+		spr.region_rect = Rect2(0, 0, 32, 42)
+		spr.texture = raw_tex
+		spr.scale = Vector2.ONE
+	elif type == "BounceEnemy":
+		# Show the full 64×64 sprite (positioned bottom-center in _ghost_position_for)
+		spr.region_enabled = false
+		spr.texture = raw_tex
+		spr.scale = Vector2.ONE
+	elif gw > 32 or gh > 32:
+		spr.region_enabled = true
+		spr.region_rect = Rect2(0, 0, 32, 32)
+		spr.texture = raw_tex
+		spr.scale = Vector2.ONE
+	else:
+		spr.region_enabled = false
+		spr.texture = raw_tex
+		spr.scale = Vector2(TILE_SIZE / float(gw), TILE_SIZE / float(gh))
+
+func _ghost_position_for(type: String, gp: Vector2i) -> Vector2:
+	var pos = grid_to_world(gp)
+	if type == "KeyDoor":
+		# 42px-tall sprite, bottom aligned to tile bottom (32 - 42 = -10)
+		pos.y -= 10
+	elif type == "BounceEnemy":
+		# 64×64 sprite: center horizontally on the tile and raise it so its
+		# bottom-center sits at the tile bottom-center (-16 x, -32 y).
+		pos.x -= 16
+		pos.y -= 32
+	return pos

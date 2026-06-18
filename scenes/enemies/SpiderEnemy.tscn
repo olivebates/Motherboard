@@ -7,7 +7,6 @@
 radius = 14.035668
 
 [node name="Enemy" type="Node2D"]
-z_index = 5
 script = ExtResource("1_enemy")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]

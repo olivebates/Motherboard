@@ -28,6 +28,7 @@ const _MUSIC_VOLUME := {
 }
 
 const _PREFS_PATH := "user://audio_prefs.json"
+const _PREFS_VERSION := 2
 
 var _sfx: Dictionary = {}
 var _music: Dictionary = {}
@@ -36,11 +37,20 @@ var _current_music: String = ""
 var _music_started := false
 var _music_muted := false
 var _sfx_muted := false
+var _music_user_volume: float = 0.35
+var _sfx_user_volume: float = 0.5
+var _music_bus_idx: int = -1
+var _sfx_bus_idx: int = -1
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_setup_buses()
+
 	for key in _SFX_FILES:
 		var p := AudioStreamPlayer.new()
 		p.stream = load(_SFX_FILES[key])
+		p.bus = "GameSFX"
+		p.process_mode = Node.PROCESS_MODE_ALWAYS
 		add_child(p)
 		_sfx[key] = p
 
@@ -59,11 +69,54 @@ func _ready() -> void:
 			(stream as AudioStreamMP3).loop = true
 		p.stream = stream
 		p.volume_db = -80.0
+		p.bus = "GameMusic"
+		p.process_mode = Node.PROCESS_MODE_ALWAYS
 		add_child(p)
 		p.play()
 		_music[key] = p
 
 	_load_prefs()
+
+func _setup_buses() -> void:
+	var mi = AudioServer.get_bus_index("GameMusic")
+	if mi == -1:
+		AudioServer.add_bus()
+		mi = AudioServer.get_bus_count() - 1
+		AudioServer.set_bus_name(mi, "GameMusic")
+		AudioServer.set_bus_send(mi, "Master")
+	_music_bus_idx = mi
+
+	var si = AudioServer.get_bus_index("GameSFX")
+	if si == -1:
+		AudioServer.add_bus()
+		si = AudioServer.get_bus_count() - 1
+		AudioServer.set_bus_name(si, "GameSFX")
+		AudioServer.set_bus_send(si, "Master")
+	_sfx_bus_idx = si
+
+func get_music_volume() -> float:
+	return _music_user_volume
+
+func set_music_volume(v: float) -> void:
+	_apply_music_volume(v)
+	_save_prefs()
+
+func get_sfx_volume() -> float:
+	return _sfx_user_volume
+
+func set_sfx_volume(v: float) -> void:
+	_apply_sfx_volume(v)
+	_save_prefs()
+
+func _apply_music_volume(v: float) -> void:
+	_music_user_volume = v
+	if _music_bus_idx >= 0:
+		AudioServer.set_bus_volume_db(_music_bus_idx, linear_to_db(v) if v > 0.001 else -80.0)
+
+func _apply_sfx_volume(v: float) -> void:
+	_sfx_user_volume = v
+	if _sfx_bus_idx >= 0:
+		AudioServer.set_bus_volume_db(_sfx_bus_idx, linear_to_db(v) if v > 0.001 else -80.0)
 
 func play_sfx(key: String) -> void:
 	if _sfx_muted:
@@ -163,9 +216,17 @@ func _save_prefs() -> void:
 	var f := FileAccess.open(_PREFS_PATH, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_string(JSON.stringify({"music_muted": _music_muted, "sfx_muted": _sfx_muted}))
+	f.store_string(JSON.stringify({
+		"version": _PREFS_VERSION,
+		"music_muted": _music_muted,
+		"sfx_muted": _sfx_muted,
+		"music_volume": _music_user_volume,
+		"sfx_volume": _sfx_user_volume,
+	}))
 
 func _load_prefs() -> void:
+	_apply_music_volume(_music_user_volume)
+	_apply_sfx_volume(_sfx_user_volume)
 	if not FileAccess.file_exists(_PREFS_PATH):
 		return
 	var f := FileAccess.open(_PREFS_PATH, FileAccess.READ)
@@ -176,3 +237,6 @@ func _load_prefs() -> void:
 		return
 	_music_muted = data.get("music_muted", false)
 	_sfx_muted = data.get("sfx_muted", false)
+	if int(data.get("version", 1)) >= _PREFS_VERSION:
+		_apply_music_volume(data.get("music_volume", _music_user_volume))
+		_apply_sfx_volume(data.get("sfx_volume", _sfx_user_volume))

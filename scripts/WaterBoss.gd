@@ -55,6 +55,10 @@ func _register_health_bar() -> void:
 
 # ── Hitbox ────────────────────────────────────────────────────────────────────
 
+# Boss keeps its origin at the tile top-left and sorts by its own rules.
+func _ground_offset() -> float:
+	return 0.0
+
 func get_center() -> Vector2:
 	return position + Vector2(16.0, 16.0) * scale.x
 
@@ -307,9 +311,7 @@ func _on_death_complete() -> void:
 	_sprite.visible = false
 	_particles.restart()
 	scale = Vector2(BOSS_SCALE, BOSS_SCALE)
-	for door in get_tree().get_nodes_in_group("boss_doors"):
-		if is_instance_valid(door):
-			door.open()
+	# Boss doors open themselves once their room has no living boss (see BossDoor).
 
 # ── Teleport ──────────────────────────────────────────────────────────────────
 

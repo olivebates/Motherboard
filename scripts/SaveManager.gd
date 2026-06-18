@@ -185,6 +185,8 @@ func _build_save_data() -> Dictionary:
 	data["boss_defeated"] = _boss_defeated
 	data["rooms_solved"] = _rooms_solved.duplicate()
 	data["breakables_destroyed"] = _breakables_destroyed.duplicate()
+	data["music_volume"] = AudioManager.get_music_volume()
+	data["sfx_volume"] = AudioManager.get_sfx_volume()
 
 	var panels_open := []
 	for panel in get_tree().get_nodes_in_group("teleport_panels"):
@@ -415,6 +417,12 @@ func _apply_load(data: Dictionary) -> void:
 	if main.map_overlay != null:
 		main.map_overlay.set_visited(visited_dict)
 
+	# Audio volumes
+	if data.has("music_volume"):
+		AudioManager.set_music_volume(float(data["music_volume"]))
+	if data.has("sfx_volume"):
+		AudioManager.set_sfx_volume(float(data["sfx_volume"]))
+
 	# Sync beam state
 	main._update_beam()
 
@@ -426,6 +434,53 @@ func _apply_load(data: Dictionary) -> void:
 			door.force_open()
 
 	_show_status("Slot %d loaded" % active_slot)
+
+# ── Export / Import / Delete ──────────────────────────────────────────────────
+
+func export_save_string() -> String:
+	var data = _build_save_data()
+	if data.is_empty():
+		return ""
+	var bytes = JSON.stringify(data).to_utf8_buffer()
+	var compressed = bytes.compress(FileAccess.COMPRESSION_DEFLATE)
+	return Marshalls.raw_to_base64(compressed)
+
+func import_save_string(encoded: String) -> bool:
+	var compressed = Marshalls.base64_to_raw(encoded)
+	var decompressed = compressed.decompress_dynamic(-1, FileAccess.COMPRESSION_DEFLATE)
+	if decompressed.size() == 0:
+		return false
+	var data = JSON.parse_string(decompressed.get_string_from_utf8())
+	if not data is Dictionary:
+		return false
+	if active_slot == -1:
+		active_slot = 1
+	_autosave_timer = 0.0
+	_key_doors_opened = []
+	_boss_doors_opened = []
+	_boss_defeated = false
+	_rooms_solved = []
+	_breakables_destroyed = []
+	_pending_data = data
+	skip_splash = true
+	GameManager.clear_scene_state()
+	get_tree().reload_current_scene()
+	return true
+
+func delete_active_save() -> void:
+	if active_slot == -1:
+		return
+	var path = SAVE_DIR + "save_slot_%d.json" % active_slot
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	_key_doors_opened = []
+	_boss_doors_opened = []
+	_boss_defeated = false
+	_rooms_solved = []
+	_breakables_destroyed = []
+	skip_splash = true
+	GameManager.clear_scene_state()
+	get_tree().reload_current_scene()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
