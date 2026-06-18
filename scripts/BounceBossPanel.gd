@@ -19,9 +19,9 @@ func _ready() -> void:
 	else:
 		$Sprite2D.texture = load("res://Sprites/objects/negative.png")
 	$Sprite2D.hide()
-	# TEMPORARY: draw above everything else. Revert to drawing under everything later.
+	# Floor level: draw under everything (same convention as FloorPanel/FloorSwitch).
 	z_as_relative = false
-	z_index = RenderingServer.CANVAS_ITEM_Z_MAX
+	z_index = -10
 	queue_redraw()
 
 func _process(_delta: float) -> void:

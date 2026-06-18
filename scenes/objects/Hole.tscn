@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3 uid="uid://br51l1xrnp82x"]
+
+[ext_resource type="Script" path="res://scripts/Hole.gd" id="1_hole"]
+[ext_resource type="Texture2D" path="res://Sprites/objects/Holes/hole1.png" id="2_hole"]
+
+[node name="Hole" type="Node2D"]
+z_index = -10
+z_as_relative = false
+script = ExtResource("1_hole")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_hole")
+centered = false
+
+[node name="Overlay" type="Sprite2D" parent="."]
+centered = false

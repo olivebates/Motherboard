@@ -111,6 +111,28 @@ func is_point_on_beam(point: Vector2, radius: float) -> bool:
 			return true
 	return false
 
+# True if any beam segment passes through the given rect (used for tile-sized hitboxes).
+func is_rect_on_beam(rect: Rect2) -> bool:
+	var resolved := _resolve_waypoints()
+	if resolved.size() < 2:
+		return false
+	for i in range(resolved.size() - 1):
+		if _segment_intersects_rect(resolved[i], resolved[i + 1], rect):
+			return true
+	return false
+
+func _segment_intersects_rect(a: Vector2, b: Vector2, rect: Rect2) -> bool:
+	if rect.has_point(a) or rect.has_point(b):
+		return true
+	var c := [rect.position,
+			  Vector2(rect.end.x, rect.position.y),
+			  rect.end,
+			  Vector2(rect.position.x, rect.end.y)]
+	for i in 4:
+		if Geometry2D.segment_intersects_segment(a, b, c[i], c[(i + 1) % 4]) != null:
+			return true
+	return false
+
 func _draw() -> void:
 	if not active:
 		return

@@ -57,6 +57,8 @@ const Y_SORT_GROUPS := [
 	"dust_piles",
 	"wind_turbines",
 	"enemy_doors",
+	"nanodroids",
+	"capacitors",
 ]
 
 func _ready() -> void:
@@ -758,6 +760,18 @@ func _reset_room() -> void:
 		var egp: Vector2i = edoor.get_grid_pos()
 		if egp.x >= rx0 and egp.x < rx0 + ROOM_WIDTH and egp.y >= ry0 and egp.y < ry0 + ROOM_HEIGHT:
 			edoor.reset()
+	for droid in get_tree().get_nodes_in_group("nanodroids"):
+		var ngp: Vector2i = droid.start_grid_pos
+		if ngp.x >= rx0 and ngp.x < rx0 + ROOM_WIDTH and ngp.y >= ry0 and ngp.y < ry0 + ROOM_HEIGHT:
+			droid.reset()
+	for hole in get_tree().get_nodes_in_group("holes"):
+		var hgp: Vector2i = hole.get_grid_pos()
+		if hgp.x >= rx0 and hgp.x < rx0 + ROOM_WIDTH and hgp.y >= ry0 and hgp.y < ry0 + ROOM_HEIGHT:
+			hole.reset()
+	for capacitor in get_tree().get_nodes_in_group("capacitors"):
+		var cgp: Vector2i = capacitor.get_grid_pos()
+		if cgp.x >= rx0 and cgp.x < rx0 + ROOM_WIDTH and cgp.y >= ry0 and cgp.y < ry0 + ROOM_HEIGHT:
+			capacitor.reset()
 	player.reset_to(room_entry_positions.get(current_room, Vector2i(2, 2)))
 	await reset_effect.done
 	_resetting = false
@@ -771,7 +785,7 @@ func tile_rect(grid_pos: Vector2i) -> Rect2:
 		float(TILE_SIZE)
 	)
 
-func _is_static_solid(grid_pos: Vector2i) -> bool:
+func _is_static_solid(grid_pos: Vector2i, include_holes: bool = true) -> bool:
 	if wall_tilemap != null and wall_tilemap.get_cell_source_id(grid_pos) != -1:
 		return true
 	for door in get_tree().get_nodes_in_group("doors"):
@@ -804,7 +818,20 @@ func _is_static_solid(grid_pos: Vector2i) -> bool:
 	for edoor in get_tree().get_nodes_in_group("enemy_doors"):
 		if not edoor.is_open and edoor.get_grid_pos() == grid_pos:
 			return true
+	for capacitor in get_tree().get_nodes_in_group("capacitors"):
+		if capacitor.get_grid_pos() == grid_pos:
+			return true
+	if include_holes:
+		for hole in get_tree().get_nodes_in_group("holes"):
+			if hole.is_solid() and hole.get_grid_pos() == grid_pos:
+				return true
 	return false
+
+func _hole_at(grid_pos: Vector2i) -> Node:
+	for hole in get_tree().get_nodes_in_group("holes"):
+		if hole.get_grid_pos() == grid_pos:
+			return hole
+	return null
 
 func is_blocked(grid_pos: Vector2i) -> bool:
 	if _is_static_solid(grid_pos):
@@ -814,7 +841,7 @@ func is_blocked(grid_pos: Vector2i) -> bool:
 			return true
 	return false
 
-func get_player_blocking_rects(area: Rect2) -> Array[Rect2]:
+func get_player_blocking_rects(area: Rect2, include_holes: bool = true) -> Array[Rect2]:
 	var rects: Array[Rect2] = []
 	var x0 := floori(area.position.x / TILE_SIZE)
 	var x1 := floori((area.end.x - 0.001) / TILE_SIZE)
@@ -823,7 +850,7 @@ func get_player_blocking_rects(area: Rect2) -> Array[Rect2]:
 	for y in range(y0, y1 + 1):
 		for x in range(x0, x1 + 1):
 			var gp := Vector2i(x, y)
-			if _is_static_solid(gp):
+			if _is_static_solid(gp, include_holes):
 				rects.append(tile_rect(gp))
 	for block in get_tree().get_nodes_in_group("push_blocks"):
 		var block_rect: Rect2 = block.get_collision_rect()
@@ -832,6 +859,10 @@ func get_player_blocking_rects(area: Rect2) -> Array[Rect2]:
 	return rects
 
 func can_push_block_to(grid_pos: Vector2i) -> bool:
+	# An empty or droid-filled hole accepts a pushable object (it sinks in).
+	var hole := _hole_at(grid_pos)
+	if hole != null and hole.can_accept_block():
+		return true
 	if _is_static_solid(grid_pos):
 		return false
 	if get_push_block_at(grid_pos) != null:
@@ -847,6 +878,8 @@ func get_push_block_at_face(player_rect: Rect2, dir: Vector2i, from_point: Vecto
 	var closest: Node = null
 	var closest_dist := INF
 	for block in get_tree().get_nodes_in_group("push_blocks"):
+		if block.is_in_group("fans"):
+			continue
 		var block_rect: Rect2 = block.get_collision_rect()
 		if dir.x > 0:
 			if absf(player_rect.end.x - block_rect.position.x) > FACE_EPS:
@@ -936,6 +969,10 @@ func _transition_to_room(new_room: Vector2i, auto_unlock: bool = true) -> void:
 		var egp := Vector2i(floori(enemy._start_pos.x / TILE_SIZE), floori(enemy._start_pos.y / TILE_SIZE))
 		if egp.x >= erx0 and egp.x < erx0 + ROOM_WIDTH and egp.y >= ery0 and egp.y < ery0 + ROOM_HEIGHT:
 			enemy.reset()
+	for hole in get_tree().get_nodes_in_group("holes"):
+		var hgp: Vector2i = hole.get_grid_pos()
+		if hgp.x >= erx0 and hgp.x < erx0 + ROOM_WIDTH and hgp.y >= ery0 and hgp.y < ery0 + ROOM_HEIGHT:
+			hole.reset()
 	for block in get_tree().get_nodes_in_group("push_blocks"):
 		var sgp: Vector2i = block.start_grid_pos
 		if sgp.x >= erx0 and sgp.x < erx0 + ROOM_WIDTH and sgp.y >= ery0 and sgp.y < ery0 + ROOM_HEIGHT:

@@ -52,7 +52,7 @@ func notify_room_solved(room: Vector2i) -> void:
 			var gp: Vector2i = door.get_grid_pos()
 			if gp.x >= rx0 and gp.x < rx0 + 25 and gp.y >= ry0 and gp.y < ry0 + 12:
 				if not door.is_open:
-					door.force_open()
+					door.force_open(true)
 
 func notify_breakable_destroyed(gp: Vector2i) -> void:
 	var entry = [gp.x, gp.y]

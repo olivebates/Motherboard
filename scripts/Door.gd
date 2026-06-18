@@ -16,6 +16,7 @@ func _ready() -> void:
 	sprite.stop()
 	GameManager.register_door(self, id)
 	GameManager.doors_update.connect(_on_doors_update)
+	$Sprite2D.visible = false
 	if starts_open:
 		is_open = true
 		sprite.frame = 4
@@ -122,10 +123,19 @@ func _do_open() -> void:
 	GameManager.shake_requested.emit(5.0)
 	_play_anim("open", func(): pass)
 
-func force_open() -> void:
+func force_open(animate: bool = false) -> void:
 	_opening = false
-	_anim_version += 1
 	is_open = true
-	sprite.animation = "open"
-	sprite.frame = 4
-	sprite.stop()
+	if animate:
+		# Room-completion open: play the open animation to the last frame.
+		GameManager.shake_requested.emit(5.0)
+		sprite.animation = "open"
+		sprite.frame = 0
+		_play_anim("open", func(): pass)
+	else:
+		# Silent restore (e.g. loading a save): snap straight to the open frame.
+		# stop() resets the frame to 0, so it must be called BEFORE setting frame 4.
+		_anim_version += 1
+		sprite.animation = "open"
+		sprite.stop()
+		sprite.frame = 4

@@ -26,6 +26,7 @@ var floor_panels: Dictionary = {}
 var doors: Dictionary = {}
 var wind_powered_ids: Array = []
 var floor_switch_ids: Array = []
+var capacitor_ids: Array = []
 
 func register_floor_panel(grid_pos: Vector2i, id: String, id2: String = "") -> void:
 	var ids: Array = [id]
@@ -67,6 +68,14 @@ func set_floor_switch(switch_id: String, active: bool) -> void:
 		floor_switch_ids.erase(switch_id)
 	evaluate_puzzle()
 
+func set_capacitor(capacitor_id: String, powered: bool) -> void:
+	if powered:
+		if capacitor_id not in capacitor_ids:
+			capacitor_ids.append(capacitor_id)
+	else:
+		capacitor_ids.erase(capacitor_id)
+	evaluate_puzzle()
+
 func set_wind_power(turbine_id: String, powered: bool) -> void:
 	if powered:
 		if turbine_id not in wind_powered_ids:
@@ -81,6 +90,7 @@ func clear_scene_state() -> void:
 	floor_panels.clear()
 	wind_powered_ids.clear()
 	floor_switch_ids.clear()
+	capacitor_ids.clear()
 	beam_blocked = false
 
 const PANEL_ACTIVATION_RADIUS := 24.0
@@ -114,6 +124,10 @@ func evaluate_puzzle() -> void:
 			ids_to_open.append(id)
 
 	for id in floor_switch_ids:
+		if id not in ids_to_open:
+			ids_to_open.append(id)
+
+	for id in capacitor_ids:
 		if id not in ids_to_open:
 			ids_to_open.append(id)
 

@@ -1,7 +1,7 @@
 [gd_scene load_steps=4 format=3 uid="uid://dryaba46jh1o0"]
 
 [ext_resource type="Script" uid="uid://bb7esa5vbaf7f" path="res://scripts/SpiderEnemy.gd" id="1_enemy"]
-[ext_resource type="Texture2D" uid="uid://c77j5miutc21b" path="res://Sprites/enemies/spider_small.png" id="2_066br"]
+[ext_resource type="Texture2D" uid="uid://dtdilj8pl03lh" path="res://Sprites/enemies/Spider_Front.png" id="2_066br"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_066br"]
 radius = 14.035668
@@ -10,7 +10,7 @@ radius = 14.035668
 script = ExtResource("1_enemy")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
-position = Vector2(0, 32)
+position = Vector2(-16, 47)
 rotation = -1.5707964
 texture = ExtResource("2_066br")
 centered = false

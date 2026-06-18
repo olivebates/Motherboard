@@ -36,6 +36,9 @@ const SCENE_MAP = {
 	"WindBlock":        "res://scenes/objects/WindBlock.tscn",
 	"DustPile":         "res://scenes/objects/DustPile.tscn",
 	"BreakableWall":    "res://scenes/objects/BreakableWall.tscn",
+	"NanoDroid":        "res://scenes/objects/NanoDroid.tscn",
+	"Hole":             "res://scenes/objects/Hole.tscn",
+	"Capacitor":        "res://scenes/objects/Capacitor.tscn",
 	"WaterEnemy":       "res://scenes/enemies/WaterEnemy.tscn",
 	"BounceEnemy":      "res://scenes/enemies/BounceEnemy.tscn",
 	"SpiderEnemy":      "res://scenes/enemies/SpiderEnemy.tscn",
@@ -62,6 +65,9 @@ const PALETTE_SPRITES = {
 	"FanDown":          "res://Sprites/objects/Fan_Front.png",
 	"WindTurbine":      "res://Sprites/objects/placeholder.png",
 	"WindBlock":        "res://Sprites/objects/Dust_Pile.png",
+	"NanoDroid":        "res://Sprites/objects/Nanobot_Back_Idle.png",
+	"Hole":             "res://Sprites/objects/Holes/hole1.png",
+	"Capacitor":        "res://Sprites/objects/Capaciter-Sheet.webp",
 	"DustPile":         "res://Sprites/objects/Dust_Pile_Alternate.png",
 	"BreakableWall":    "res://Sprites/objects/wall_breakable.png",
 	"KeyBreakableWall": "res://Sprites/objects/wall_breakable.png",
@@ -362,6 +368,34 @@ func _build_palette() -> void:
 			kd_container.add_child(kd_rect)
 			palette_list.add_child(kd_container)
 			_palette_buttons[t] = kd_container
+		elif t == "Capacitor":
+			# 32×48 sheet; show the first frame bottom-anchored (top 16px clipped)
+			var cap_container = Button.new()
+			cap_container.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
+			cap_container.clip_contents = true
+			cap_container.tooltip_text = t
+			cap_container.flat = false
+			cap_container.pressed.connect(func(): _select_type(t))
+			var cap_raw = load(PALETTE_SPRITES["Capacitor"]) as Texture2D
+			var cap_atlas = AtlasTexture.new()
+			cap_atlas.atlas = cap_raw
+			cap_atlas.region = Rect2(0, 0, 32, 48)
+			var cap_rect = TextureRect.new()
+			cap_rect.texture = cap_atlas
+			cap_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			cap_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			cap_rect.anchor_left = 0.0
+			cap_rect.anchor_right = 1.0
+			cap_rect.anchor_top = 1.0
+			cap_rect.anchor_bottom = 1.0
+			cap_rect.offset_top = -48
+			cap_rect.offset_bottom = 0
+			cap_rect.offset_left = 0
+			cap_rect.offset_right = 0
+			cap_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			cap_container.add_child(cap_rect)
+			palette_list.add_child(cap_container)
+			_palette_buttons[t] = cap_container
 		elif t == "BounceEnemy":
 			# 64×64 sprite shown bottom-center anchored, scaled to fit the cell
 			var be_container = Button.new()
@@ -1182,7 +1216,7 @@ var current_room: Vector2i = Vector2i(0, 0)
 func tile_rect(gp: Vector2i) -> Rect2:
 	return Rect2(gp.x * TILE_SIZE, gp.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
 
-func _is_static_solid(gp: Vector2i) -> bool:
+func _is_static_solid(gp: Vector2i, include_holes: bool = true) -> bool:
 	if walls_tilemap == null: return false
 	if walls_tilemap.get_cell_source_id(gp) >= 0 or border_walls_tilemap.get_cell_source_id(gp) >= 0:
 		return true
@@ -1210,12 +1244,25 @@ func _is_static_solid(gp: Vector2i) -> bool:
 	for edoor in get_tree().get_nodes_in_group("enemy_doors"):
 		if not edoor.is_open and edoor.get_grid_pos() == gp:
 			return true
+	for capacitor in get_tree().get_nodes_in_group("capacitors"):
+		if capacitor.get_grid_pos() == gp:
+			return true
 	for ep in get_tree().get_nodes_in_group("exit_points"):
 		if not ep.is_open and ep.get_grid_pos() == gp:
 			return true
+	if include_holes:
+		for hole in get_tree().get_nodes_in_group("holes"):
+			if hole.is_solid() and hole.get_grid_pos() == gp:
+				return true
 	return false
 
-func get_player_blocking_rects(area: Rect2) -> Array[Rect2]:
+func _hole_at(gp: Vector2i) -> Node:
+	for hole in get_tree().get_nodes_in_group("holes"):
+		if hole.get_grid_pos() == gp:
+			return hole
+	return null
+
+func get_player_blocking_rects(area: Rect2, include_holes: bool = true) -> Array[Rect2]:
 	var rects: Array[Rect2] = []
 	var x0 = floori(area.position.x / TILE_SIZE)
 	var x1 = floori((area.end.x - 0.001) / TILE_SIZE)
@@ -1223,7 +1270,7 @@ func get_player_blocking_rects(area: Rect2) -> Array[Rect2]:
 	var y1 = floori((area.end.y - 0.001) / TILE_SIZE)
 	for y in range(y0, y1 + 1):
 		for x in range(x0, x1 + 1):
-			if _is_static_solid(Vector2i(x, y)):
+			if _is_static_solid(Vector2i(x, y), include_holes):
 				rects.append(tile_rect(Vector2i(x, y)))
 	for block in get_tree().get_nodes_in_group("push_blocks"):
 		if block.has_method("get_collision_rect"):
@@ -1246,6 +1293,9 @@ func is_blocked(gp: Vector2i) -> bool:
 	return false
 
 func can_push_block_to(gp: Vector2i) -> bool:
+	var hole := _hole_at(gp)
+	if hole != null and hole.can_accept_block():
+		return true
 	return not _is_static_solid(gp) and get_push_block_at(gp) == null and not has_pass_block_at(gp)
 
 func get_push_block_at(gp: Vector2i) -> Node:
@@ -1259,6 +1309,7 @@ func get_push_block_at_face(player_rect: Rect2, dir: Vector2i, from_point: Vecto
 	var closest_dist = INF
 	for block in get_tree().get_nodes_in_group("push_blocks"):
 		if not block.has_method("get_collision_rect"): continue
+		if block.is_in_group("fans"): continue
 		var br: Rect2 = block.get_collision_rect()
 		if dir.x > 0 and absf(player_rect.end.x - br.position.x) > FACE_EPS: continue
 		elif dir.x < 0 and absf(player_rect.position.x - br.end.x) > FACE_EPS: continue
@@ -1850,6 +1901,12 @@ func _apply_ghost_texture_to(spr: Sprite2D, type: String) -> void:
 		spr.region_rect = Rect2(0, 0, 32, 42)
 		spr.texture = raw_tex
 		spr.scale = Vector2.ONE
+	elif type == "Capacitor":
+		# Show the first 32×48 frame, bottom-anchored
+		spr.region_enabled = true
+		spr.region_rect = Rect2(0, 0, 32, 48)
+		spr.texture = raw_tex
+		spr.scale = Vector2.ONE
 	elif type == "BounceEnemy":
 		# Show the full 64×64 sprite (positioned bottom-center in _ghost_position_for)
 		spr.region_enabled = false
@@ -1870,6 +1927,9 @@ func _ghost_position_for(type: String, gp: Vector2i) -> Vector2:
 	if type == "KeyDoor":
 		# 42px-tall sprite, bottom aligned to tile bottom (32 - 42 = -10)
 		pos.y -= 10
+	elif type == "Capacitor":
+		# 48px-tall sprite, bottom aligned to tile bottom (32 - 48 = -16)
+		pos.y -= 16
 	elif type == "BounceEnemy":
 		# 64×64 sprite: center horizontally on the tile and raise it so its
 		# bottom-center sits at the tile bottom-center (-16 x, -32 y).

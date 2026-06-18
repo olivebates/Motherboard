@@ -8,6 +8,7 @@ const SPRITE_SPEED := 24.0
 const CONTACT_EPS := 0.1
 const PUSH_FREEZE := 0.15
 const PUSH_HOLD_TIME := 0.15
+const PUSH_KICK_TIME := 0.2
 
 @export var start_with_push: bool = false
 @export var start_with_chain: bool = false
@@ -23,6 +24,9 @@ var _push_tween: Tween
 var _push_charge_time := 0.0
 var _push_charge_dir := Vector2i.ZERO
 var _push_charge_block: Node = null
+var _push_pose_dir := Vector2i.ZERO   # direction of the "pressing against a block" pose (0 = none)
+var _push_kick_dir := Vector2i.ZERO   # direction of the "block just moved" kick frame
+var _push_kick_time := 0.0            # remaining time to show the kick frame
 var _main: Node2D
 
 @onready var _body: Node2D = $Body
@@ -73,6 +77,11 @@ func _setup_animations() -> void:
 	_add_sheet(frames, "back_idle",  "res://Sprites/player/Spark_Back_Idle.webp",  4, 2, 8, 8.0)
 	_add_sheet(frames, "back_run",   "res://Sprites/player/Spark_Back_Run.webp",   3, 2, 6, 12.0)
 	_add_sheet(frames, "teleport",   "res://Sprites/player/Teleport_Spritesheet.webp", 2, 2, 4, 12.0, false)
+	# Push poses: 2 frames each, controlled manually (frame 0 = pressing, frame 1 = block moved).
+	# push_up frames are 32×36 (4px taller); the extra height bleeds upward (handled in _play_push).
+	_add_strip(frames, "push_side", "res://Sprites/player/Push_side-Sheet.webp", 32, 32, 2)
+	_add_strip(frames, "push_up",   "res://Sprites/player/Push_up-Sheet.webp",   32, 36, 2)
+	_add_strip(frames, "push_down", "res://Sprites/player/Push_down-Sheet.webp", 32, 32, 2)
 	_sprite.sprite_frames = frames
 	_sprite.play("front_idle")
 
@@ -92,6 +101,16 @@ func _add_sheet(frames: SpriteFrames, anim: String, path: String, cols: int, row
 			frames.add_frame(anim, atlas)
 			f += 1
 
+func _add_strip(frames: SpriteFrames, anim: String, path: String, fw: int, fh: int, count: int) -> void:
+	var tex: Texture2D = load(path)
+	frames.add_animation(anim)
+	frames.set_animation_loop(anim, false)
+	for i in range(count):
+		var atlas = AtlasTexture.new()
+		atlas.atlas = tex
+		atlas.region = Rect2(i * fw, 0, fw, fh)
+		frames.add_frame(anim, atlas)
+
 func _update_animation(raw: Vector2, moved_x: bool, moved_y: bool) -> void:
 	var is_moving = moved_x or moved_y
 	if raw.x > 0.0:
@@ -104,10 +123,34 @@ func _update_animation(raw: Vector2, moved_x: bool, moved_y: bool) -> void:
 		_facing = "back"
 	elif raw.y > 0.0:
 		_facing = "front"
+	# Push poses override the normal walk/idle animations.
+	if _push_kick_time > 0.0 and _push_kick_dir != Vector2i.ZERO:
+		_play_push(_push_kick_dir, 1)
+		return
+	if _push_pose_dir != Vector2i.ZERO:
+		_play_push(_push_pose_dir, 0)
+		return
 	var anim = _facing + ("_run" if is_moving else "_idle")
 	if _sprite.animation != anim:
 		_sprite.play(anim)
 	_sprite.flip_h = (_facing == "side" and not _facing_right)
+
+func _play_push(dir: Vector2i, frame_idx: int) -> void:
+	var anim := "push_down"
+	var flip := false
+	if dir.x != 0:
+		anim = "push_side"
+		flip = dir.x < 0
+	elif dir.y < 0:
+		anim = "push_up"
+	if _sprite.animation != anim:
+		_sprite.play(anim)
+	_sprite.pause()
+	_sprite.frame = frame_idx
+	_sprite.flip_h = (anim == "push_side" and flip)
+	# push_up frames are 4px taller; shift up so the extra height bleeds above the tile.
+	if anim == "push_up":
+		_sprite.position.y -= 4.0
 
 func get_body_center() -> Vector2:
 	return YSortHitboxBottom.hitbox_center_from_root(position, _body_offset, _hitbox_offset)
@@ -121,8 +164,10 @@ func _process(delta: float) -> void:
 	_sprite.position = lag + Vector2(-16.0 * _sprite.scale.x, 16.0 - 32.0 * _sprite.scale.y)
 
 	if movement_locked:
+		_push_pose_dir = Vector2i.ZERO
+		_push_kick_time = 0.0
 		_sprite.scale = _sprite.scale.lerp(Vector2.ONE, 15.0 * delta)
-		if _sprite.animation.ends_with("_run"):
+		if _sprite.animation.ends_with("_run") or _sprite.animation.begins_with("push"):
 			_sprite.play(_facing + "_idle")
 		return
 
@@ -153,6 +198,9 @@ func _process(delta: float) -> void:
 	var moved_y: bool = y_move.moved
 
 	var pushed := _try_push(raw, moved_x, moved_y, main, delta)
+
+	if _push_kick_time > 0.0:
+		_push_kick_time = maxf(0.0, _push_kick_time - delta)
 
 	_update_animation(raw, moved_x, moved_y)
 
@@ -305,6 +353,7 @@ func _move_axis_y(pos: Vector2, dy: float, main: Node) -> Dictionary:
 	return {"pos": Vector2(pos.x, pos.y + allowed), "moved": moved}
 
 func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: float) -> bool:
+	_push_pose_dir = Vector2i.ZERO
 	if not GameManager.has_ability("push"):
 		_push_charge_time = 0.0
 		_push_charge_dir = Vector2i.ZERO
@@ -347,6 +396,9 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: fl
 		_push_charge_block = null
 		return false
 
+	# Flush against a pushable block and pressing into it → show the pressing pose.
+	_push_pose_dir = dir
+
 	if not block.is_in_group("fans"):
 		var wind_dir := _get_fan_airflow_direction()
 		if wind_dir != Vector2i.ZERO and dir == -wind_dir:
@@ -380,6 +432,9 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: fl
 	_start_push_lock(dir)
 	main._trigger_shake(0.8)
 	main.record_push(block, push_from, dir)
+	_push_kick_dir = dir
+	_push_kick_time = PUSH_KICK_TIME
+	_push_pose_dir = Vector2i.ZERO
 	return true
 
 func _sprite_center() -> Vector2:

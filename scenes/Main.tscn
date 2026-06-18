@@ -1,4 +1,4 @@
-[gd_scene load_steps=46 format=4 uid="uid://cgvx1hckno78k"]
+[gd_scene load_steps=44 format=4 uid="uid://cgvx1hckno78k"]
 
 [ext_resource type="Script" uid="uid://bykaqtvdjj7aw" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="Texture2D" uid="uid://rxef42vfuoej" path="res://Sprites/ui/Circuit_Sprite_Sheet.webp" id="2_fs0b5"]
@@ -24,7 +24,6 @@
 [ext_resource type="PackedScene" path="res://scenes/enemies/WaterEnemy.tscn" id="22_yxlcp"]
 [ext_resource type="PackedScene" path="res://scenes/enemies/WaterBoss.tscn" id="23_ebg2g"]
 [ext_resource type="PackedScene" path="res://scenes/objects/BossDoor.tscn" id="24_2ofn6"]
-[ext_resource type="PackedScene" path="res://scenes/objects/TimedObject.tscn" id="25_xa025"]
 [ext_resource type="PackedScene" path="res://scenes/objects/BreakableWall.tscn" id="26_36rkl"]
 [ext_resource type="PackedScene" uid="uid://b0w3hdx1nmyjl" path="res://scenes/enemies/BounceEnemy.tscn" id="28_e2s0e"]
 [ext_resource type="PackedScene" path="res://scenes/objects/RoomSolvedTile.tscn" id="28_ma7h6"]
@@ -36,10 +35,9 @@
 [ext_resource type="PackedScene" path="res://scenes/objects/FanRight.tscn" id="33_2c4at"]
 [ext_resource type="PackedScene" path="res://scenes/objects/FanUp.tscn" id="35_g6wdg"]
 [ext_resource type="PackedScene" uid="uid://bj6ky4i0ooeg1" path="res://scenes/objects/OrbDisplay.tscn" id="36_hq6as"]
-[ext_resource type="PackedScene" path="res://scenes/objects/FloorSwitch.tscn" id="37_kxyth"]
+[ext_resource type="PackedScene" uid="uid://b00000021" path="res://scenes/objects/FloorSwitch.tscn" id="37_kxyth"]
 [ext_resource type="Texture2D" uid="uid://bl8kqt6tmvjcl" path="res://Sprites/objects/undo button.png" id="38_cobve"]
 [ext_resource type="PackedScene" uid="uid://dryaba46jh1o0" path="res://scenes/enemies/SpiderEnemy.tscn" id="39_cmqll"]
-[ext_resource type="PackedScene" uid="uid://k5bpdyn15e60" path="res://scenes/Key.tscn" id="40_8cp6k"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_ma7h6"]
 texture = ExtResource("2_fs0b5")
@@ -1695,10 +1693,6 @@ position = Vector2(64, -576)
 [node name="BossDoor3" parent="." instance=ExtResource("24_2ofn6")]
 position = Vector2(3584, -64)
 
-[node name="TimedObject" parent="." instance=ExtResource("25_xa025")]
-z_index = -100
-position = Vector2(3016, 40)
-
 [node name="PowerOrb3" parent="." instance=ExtResource("18_nfivy")]
 position = Vector2(4576, 960)
 ability = "break"
@@ -2078,6 +2072,9 @@ position = Vector2(4640, 960)
 [node name="RoomSolvedTile" parent="." instance=ExtResource("28_ma7h6")]
 position = Vector2(768, 256)
 
+[node name="RoomSolvedTile25" parent="." instance=ExtResource("28_ma7h6")]
+position = Vector2(832, 576)
+
 [node name="RoomSolvedTile24" parent="." instance=ExtResource("28_ma7h6")]
 position = Vector2(1376, 352)
 
@@ -2116,6 +2113,9 @@ position = Vector2(64, -1184)
 
 [node name="RoomSolvedTile21" parent="." instance=ExtResource("28_ma7h6")]
 position = Vector2(32, -800)
+
+[node name="RoomSolvedTile26" parent="." instance=ExtResource("28_ma7h6")]
+position = Vector2(-64, -800)
 
 [node name="RoomSolvedTile19" parent="." instance=ExtResource("28_ma7h6")]
 position = Vector2(832, -1472)
@@ -2344,5 +2344,5 @@ position = Vector2(608, -1248)
 [node name="DustPile" parent="." instance=ExtResource("32_g6wdg")]
 position = Vector2(-480, -1280)
 
-[node name="Key8" parent="." instance=ExtResource("40_8cp6k")]
+[node name="Key8" parent="." instance=ExtResource("14_3p2gp")]
 position = Vector2(-480, -1248)

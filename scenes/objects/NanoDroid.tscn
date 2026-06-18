@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://b155i8pnfavmu"]
+
+[ext_resource type="Script" path="res://scripts/NanoDroid.gd" id="1_nanodroid"]
+[ext_resource type="Texture2D" path="res://Sprites/objects/Nanobot_Back_Idle.png" id="2_nanodroid"]
+
+[node name="NanoDroid" type="Node2D"]
+script = ExtResource("1_nanodroid")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_nanodroid")
+centered = false

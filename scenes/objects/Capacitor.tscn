@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3 uid="uid://c4p4c1t0r0001"]
+
+[ext_resource type="Script" path="res://scripts/Capacitor.gd" id="1_capacitor"]
+[ext_resource type="Texture2D" uid="uid://dh5cqpo0l74ns" path="res://Sprites/objects/Capaciter-Sheet.webp" id="2_capacitor"]
+
+[node name="Capacitor" type="Node2D"]
+script = ExtResource("1_capacitor")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+position = Vector2(0, -16)
+texture = ExtResource("2_capacitor")
+centered = false
+hframes = 8

@@ -8,6 +8,7 @@ var _opening := false
 @onready var sprite: AnimatedSprite2D = $AnimatedSprite2D
 
 func _ready() -> void:
+	$Sprite2D.visible = false
 	add_to_group("key_doors")
 	_setup_animations()
 	sprite.frame = 0
