@@ -9,7 +9,7 @@ var _collected := false
 func _ready() -> void:
 	add_to_group("keys")
 	_original_position = position
-	start_grid_pos = Vector2i(int(position.x) / 32, int(position.y) / 32)
+	start_grid_pos = GridUtils.to_grid(position)
 	z_index = -5
 	$Sprite2D.visible = false
 	_setup_animations()
@@ -53,7 +53,7 @@ func _process(_delta: float) -> void:
 		_collect(player)
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(int(position.x) / 32, int(position.y) / 32)
+	return GridUtils.to_grid(position)
 
 func _room_of(pos: Vector2) -> Vector2i:
 	return Vector2i(floori(pos.x / 800.0), floori(pos.y / 384.0))

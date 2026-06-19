@@ -81,71 +81,43 @@ func _handle_beam() -> void:
 func _move_x(dx: float) -> void:
 	if dx == 0.0:
 		return
-	var rect := _hitbox(position)
-	var probe := rect.merge(_hitbox(position + Vector2(dx, 0.0)))
-	var allowed := dx
-	for solid in _main.get_player_blocking_rects(probe):
-		if rect.position.y >= solid.end.y or solid.position.y >= rect.end.y:
-			continue
-		if dx > 0.0 and rect.end.x <= solid.position.x + CONTACT_EPS:
-			allowed = minf(allowed, solid.position.x - rect.end.x)
-		elif dx < 0.0 and rect.position.x >= solid.end.x - CONTACT_EPS:
-			allowed = maxf(allowed, solid.end.x - rect.position.x)
-		else:
-			allowed = 0.0
-	position.x += clampf(allowed, minf(dx, 0.0), maxf(dx, 0.0))
+	var rect = _hitbox(position)
+	var probe = rect.merge(_hitbox(position + Vector2(dx, 0.0)))
+	position.x += MoveUtils.sweep_x(rect, dx, _main.get_player_blocking_rects(probe), CONTACT_EPS)
 
 func _move_y(dy: float) -> void:
 	if dy == 0.0:
 		return
-	var rect := _hitbox(position)
-	var probe := rect.merge(_hitbox(position + Vector2(0.0, dy)))
-	var allowed := dy
-	for solid in _main.get_player_blocking_rects(probe):
-		if rect.position.x >= solid.end.x or solid.position.x >= rect.end.x:
-			continue
-		if dy > 0.0 and rect.end.y <= solid.position.y + CONTACT_EPS:
-			allowed = minf(allowed, solid.position.y - rect.end.y)
-		elif dy < 0.0 and rect.position.y >= solid.end.y - CONTACT_EPS:
-			allowed = maxf(allowed, solid.end.y - rect.position.y)
-		else:
-			allowed = 0.0
-	position.y += clampf(allowed, minf(dy, 0.0), maxf(dy, 0.0))
+	var rect = _hitbox(position)
+	var probe = rect.merge(_hitbox(position + Vector2(0.0, dy)))
+	position.y += MoveUtils.sweep_y(rect, dy, _main.get_player_blocking_rects(probe), CONTACT_EPS)
 
 func _eject_from_solid() -> void:
-	var rect := _hitbox(position)
-	var inside := false
-	for solid in _main.get_player_blocking_rects(rect):
-		if rect.intersects(solid):
-			inside = true
-			break
-	if not inside:
+	if not MoveUtils.rect_hits_any(_hitbox(position), _main.get_player_blocking_rects(_hitbox(position))):
 		return
-	var off := _ground_offset()
-	var origin := Vector2i(floori(position.x / TILE_SIZE), floori((position.y - off) / TILE_SIZE))
-	var visited := { origin: true }
-	var queue: Array[Vector2i] = [origin]
-	while not queue.is_empty():
-		var gp: Vector2i = queue.pop_front()
-		var candidate := Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE + off)
-		var candidate_rect := _hitbox(candidate)
-		var blocked := false
-		for solid in _main.get_player_blocking_rects(candidate_rect):
-			if candidate_rect.intersects(solid):
-				blocked = true
-				break
-		if not blocked:
-			position = candidate
-			_visual_pos = position
-			return
-		for d in [Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1)]:
-			var next = gp + d
-			if not visited.has(next):
-				visited[next] = true
-				queue.append(next)
+	var off = _ground_offset()
+	var origin = Vector2i(floori(position.x / TILE_SIZE), floori((position.y - off) / TILE_SIZE))
+	var is_free = func(c):
+		var rect = _hitbox(Vector2(c.x * TILE_SIZE, c.y * TILE_SIZE + off))
+		return not MoveUtils.rect_hits_any(rect, _main.get_player_blocking_rects(rect))
+	var gp = MoveUtils.find_free_cell(origin, is_free)
+	if gp != null:
+		position = Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE + off)
+		_visual_pos = position
 
 func push(dir: Vector2i) -> void:
 	position += Vector2(dir.x, dir.y) * TILE_SIZE
+
+# ── Push-back interface (mirrors Player) ─────────────────────────────────────
+# Used by Main's push undo/redo to shove an actor standing where a block returns.
+
+func get_push_hitbox() -> Rect2:
+	return _hitbox(position)
+
+func push_out(displacement: Vector2) -> void:
+	position += displacement
+	# Leave _visual_pos where it was so the sprite lags behind and eases over,
+	# instead of teleporting with the body.
 
 func _die() -> void:
 	_dead = true

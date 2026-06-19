@@ -15,12 +15,28 @@ const CONTACT_EPS := 0.1
 const BEAM_RADIUS := 12.0
 const BREAK_RADIUS := 64.0
 const RESET_RADIUS := 48.0
+const PUSH_HOLD_TIME := 0.15   # must press into a block this long before it moves (mirrors Player)
+const PUSH_FREEZE := 0.15      # brief cooldown after a push before it can charge again
+const SPRITE_SPEED := 20.0     # how fast the sprite eases back after a shove
 
 var start_grid_pos: Vector2i = Vector2i.ZERO
 var _home_room: Vector2i = Vector2i.ZERO
 var _was_current := false
 var _main: Node = null
 var _destroyed := false
+
+# Push state (mirrors Player): the droid presses into a pushable block in its
+# movement direction and, after charging, shoves it one tile.
+var _push_charge_time := 0.0
+var _push_charge_dir := Vector2i.ZERO
+var _push_charge_block: Node = null
+var _push_lock_dir := Vector2i.ZERO
+var _push_lock_time := 0.0
+
+# Sprite lag: normally zero (the sprite sits exactly on the body). When the droid
+# is shoved (push undo), this holds the sprite back and eases to zero so the body
+# doesn't visibly teleport.
+var _sprite_lag := Vector2.ZERO
 
 # Position is the 32×32 sprite top-left (tile top-left, like blocks/enemies).
 # The collision hitbox is a small box centered on the tile, mirroring the player.
@@ -31,12 +47,12 @@ var _hitbox_offset := Vector2(16.0, 16.0)
 
 var grid_pos: Vector2i:
 	get:
-		return Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
+		return GridUtils.to_grid(position)
 
 func _ready() -> void:
 	add_to_group("nanodroids")
 	_main = get_tree().current_scene
-	start_grid_pos = Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
+	start_grid_pos = GridUtils.to_grid(position)
 	_home_room = Vector2i(
 		floori(float(start_grid_pos.x) / ROOM_WIDTH),
 		floori(float(start_grid_pos.y) / ROOM_HEIGHT)
@@ -48,6 +64,16 @@ func _ready() -> void:
 
 func get_center() -> Vector2:
 	return position + _hitbox_offset
+
+# ── Push-back interface (mirrors Player) ─────────────────────────────────────
+
+func get_push_hitbox() -> Rect2:
+	return _hitbox_rect(position)
+
+func push_out(displacement: Vector2) -> void:
+	position += displacement
+	# Hold the sprite at its old spot; _process eases the lag back to zero.
+	_sprite_lag -= displacement
 
 func _is_in_current_room() -> bool:
 	var cr = _main.get("current_room")
@@ -66,7 +92,7 @@ func _clamp_to_room() -> void:
 	position += clamped - c
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
+	return GridUtils.to_grid(position)
 
 func _process(delta: float) -> void:
 	if _main == null:
@@ -100,8 +126,19 @@ func _process(delta: float) -> void:
 	if input.length_squared() > 0.0:
 		input = input.normalized()
 	var velocity := input * SPEED
+	if _push_lock_time > 0.0:
+		_push_lock_time = maxf(0.0, _push_lock_time - delta)
+		if _push_lock_time == 0.0:
+			_push_lock_dir = Vector2i.ZERO
+	var before_x := position.x
 	position = _move_axis_x(position, velocity.x * delta)
+	var moved_x := absf(position.x - before_x) > 0.001
+	var before_y := position.y
 	position = _move_axis_y(position, velocity.y * delta)
+	var moved_y := absf(position.y - before_y) > 0.001
+
+	# Shove a pushable block the droid is pressing against, just like the player.
+	_try_push(input, moved_x, moved_y, delta)
 
 	# Pushed by fan airflow, the same continuous drift the player receives.
 	var wind := Vector2.ZERO
@@ -114,6 +151,13 @@ func _process(delta: float) -> void:
 
 	# Keep it inside its room: a 16px inset border it cannot cross.
 	_clamp_to_room()
+
+	# Ease the sprite back after a shove so the body doesn't snap into place.
+	if _sprite_lag != Vector2.ZERO:
+		_sprite_lag = _sprite_lag.lerp(Vector2.ZERO, minf(1.0, SPRITE_SPEED * delta))
+		if _sprite_lag.length() < 0.5:
+			_sprite_lag = Vector2.ZERO
+		sprite.position = _sprite_lag
 
 	# Touching the player restarts the room.
 	if pl != null and pl.has_method("get_body_center") and _touches(pl.get_body_center()):
@@ -191,29 +235,83 @@ func _spawn_shockwave(center: Vector2) -> void:
 	flash_tw.finished.connect(flash.queue_free)
 
 func _spawn_particles(center: Vector2) -> void:
-	var particles := CPUParticles2D.new()
-	particles.position = center
-	particles.z_index = 10
-	particles.emitting = true
-	particles.one_shot = true
-	particles.explosiveness = 1.0
-	particles.amount = 28
-	particles.lifetime = 0.6
-	particles.initial_velocity_min = 60.0
-	particles.initial_velocity_max = 160.0
-	particles.gravity = Vector2(0, 200)
-	particles.scale_amount_min = 2.0
-	particles.scale_amount_max = 4.0
-	particles.color = Color(1.0, 1.0, 1.0, 1.0)
-	_main.add_child(particles)
-	get_tree().create_timer(particles.lifetime + 0.1).timeout.connect(particles.queue_free)
+	EffectUtils.spawn_burst(_main, center, {
+		"amount": 28, "lifetime": 0.6,
+		"velocity_min": 60.0, "velocity_max": 160.0,
+		"gravity": Vector2(0, 200), "scale_min": 2.0, "scale_max": 4.0,
+	})
 
 func reset() -> void:
 	_destroyed = false
 	position = Vector2(start_grid_pos.x * TILE_SIZE, start_grid_pos.y * TILE_SIZE)
 	sprite.visible = true
 	sprite.position = Vector2.ZERO
+	_sprite_lag = Vector2.ZERO
+	_reset_push_charge()
+	_push_lock_dir = Vector2i.ZERO
+	_push_lock_time = 0.0
 	_eject_from_solid()
+
+# ── Block pushing (mirrors Player._try_push) ─────────────────────────────────
+
+func _cardinal_dir(input: Vector2) -> Vector2i:
+	# Pure left/right/up/down only; diagonals don't push (matches the player).
+	if input.x > 0.0 and input.y == 0.0:
+		return Vector2i(1, 0)
+	if input.x < 0.0 and input.y == 0.0:
+		return Vector2i(-1, 0)
+	if input.y > 0.0 and input.x == 0.0:
+		return Vector2i(0, 1)
+	if input.y < 0.0 and input.x == 0.0:
+		return Vector2i(0, -1)
+	return Vector2i.ZERO
+
+func _reset_push_charge() -> void:
+	_push_charge_time = 0.0
+	_push_charge_dir = Vector2i.ZERO
+	_push_charge_block = null
+
+func _try_push(input: Vector2, moved_x: bool, moved_y: bool, delta: float) -> void:
+	var dir := _cardinal_dir(input)
+	if dir == Vector2i.ZERO or dir == _push_lock_dir:
+		_reset_push_charge()
+		return
+
+	var block: Node = _main.get_push_block_at_face(_hitbox_rect(position), dir, get_center())
+	if block == null:
+		_reset_push_charge()
+		return
+
+	# If the droid still has room to move on the push axis it isn't flush against
+	# the block yet, so don't begin charging.
+	if (dir.x != 0 and moved_x) or (dir.y != 0 and moved_y):
+		_reset_push_charge()
+		return
+
+	var dest: Vector2i = block.grid_pos + dir
+	if not _main.can_push_block_to(dest):
+		_reset_push_charge()
+		return
+
+	if dir == _push_charge_dir and block == _push_charge_block:
+		_push_charge_time += delta
+	else:
+		_push_charge_dir = dir
+		_push_charge_block = block
+		_push_charge_time = delta
+
+	if _push_charge_time < PUSH_HOLD_TIME:
+		return
+
+	_reset_push_charge()
+	var push_from: Vector2i = block.grid_pos
+	block.push(dir)
+	_push_lock_dir = dir
+	_push_lock_time = PUSH_FREEZE
+	if _main.has_method("_trigger_shake"):
+		_main._trigger_shake(0.8)
+	if _main.has_method("record_push"):
+		_main.record_push(block, push_from, dir)
 
 # ── Collision (mirrors Player axis-separated AABB sweep) ──────────────────────
 
@@ -229,84 +327,29 @@ func _hitbox_rect(pos: Vector2) -> Rect2:
 func _move_axis_x(pos: Vector2, dx: float) -> Vector2:
 	if dx == 0.0:
 		return pos
-	var old_rect := _hitbox_rect(pos)
-	var allowed := dx
-	var probe := old_rect.merge(_hitbox_rect(pos + Vector2(dx, 0.0)))
-	for solid in _main.get_player_blocking_rects(probe, false):
-		if not _rects_overlap_y(old_rect, solid):
-			continue
-		if dx > 0.0:
-			if old_rect.end.x <= solid.position.x + CONTACT_EPS:
-				allowed = minf(allowed, solid.position.x - old_rect.end.x)
-			else:
-				allowed = 0.0
-		elif old_rect.position.x >= solid.end.x - CONTACT_EPS:
-			allowed = maxf(allowed, solid.end.x - old_rect.position.x)
-		else:
-			allowed = 0.0
-	if dx > 0.0:
-		allowed = clampf(allowed, 0.0, dx)
-	else:
-		allowed = clampf(allowed, dx, 0.0)
+	var old_rect = _hitbox_rect(pos)
+	var probe = old_rect.merge(_hitbox_rect(pos + Vector2(dx, 0.0)))
+	var allowed = MoveUtils.sweep_x(old_rect, dx, _main.get_player_blocking_rects(probe, false), CONTACT_EPS)
 	return Vector2(pos.x + allowed, pos.y)
 
 func _move_axis_y(pos: Vector2, dy: float) -> Vector2:
 	if dy == 0.0:
 		return pos
-	var old_rect := _hitbox_rect(pos)
-	var allowed := dy
-	var probe := old_rect.merge(_hitbox_rect(pos + Vector2(0.0, dy)))
-	for solid in _main.get_player_blocking_rects(probe, false):
-		if not _rects_overlap_x(old_rect, solid):
-			continue
-		if dy > 0.0:
-			if old_rect.end.y <= solid.position.y + CONTACT_EPS:
-				allowed = minf(allowed, solid.position.y - old_rect.end.y)
-			else:
-				allowed = 0.0
-		elif old_rect.position.y >= solid.end.y - CONTACT_EPS:
-			allowed = maxf(allowed, solid.end.y - old_rect.position.y)
-		else:
-			allowed = 0.0
-	if dy > 0.0:
-		allowed = clampf(allowed, 0.0, dy)
-	else:
-		allowed = clampf(allowed, dy, 0.0)
+	var old_rect = _hitbox_rect(pos)
+	var probe = old_rect.merge(_hitbox_rect(pos + Vector2(0.0, dy)))
+	var allowed = MoveUtils.sweep_y(old_rect, dy, _main.get_player_blocking_rects(probe, false), CONTACT_EPS)
 	return Vector2(pos.x, pos.y + allowed)
 
-func _rects_overlap_x(a: Rect2, b: Rect2) -> bool:
-	return a.position.x < b.end.x and b.position.x < a.end.x
-
-func _rects_overlap_y(a: Rect2, b: Rect2) -> bool:
-	return a.position.y < b.end.y and b.position.y < a.end.y
-
 func _is_inside_solid() -> bool:
-	var rect := _hitbox_rect(position)
-	for solid in _main.get_player_blocking_rects(rect, false):
-		if rect.intersects(solid):
-			return true
-	return false
+	var rect = _hitbox_rect(position)
+	return MoveUtils.rect_hits_any(rect, _main.get_player_blocking_rects(rect, false))
 
 func _eject_from_solid() -> void:
 	if _main == null or not _is_inside_solid():
 		return
-	var origin := grid_pos
-	var visited := {origin: true}
-	var queue: Array[Vector2i] = [origin]
-	while queue.size() > 0:
-		var gp: Vector2i = queue.pop_front()
-		var candidate := Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE)
-		var rect := _hitbox_rect(candidate)
-		var blocked := false
-		for solid in _main.get_player_blocking_rects(rect, false):
-			if rect.intersects(solid):
-				blocked = true
-				break
-		if not blocked:
-			position = candidate
-			return
-		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-			var next = gp + d
-			if not visited.has(next):
-				visited[next] = true
-				queue.append(next)
+	var is_free = func(c):
+		var rect = _hitbox_rect(Vector2(c.x * TILE_SIZE, c.y * TILE_SIZE))
+		return not MoveUtils.rect_hits_any(rect, _main.get_player_blocking_rects(rect, false))
+	var gp = MoveUtils.find_free_cell(grid_pos, is_free)
+	if gp != null:
+		position = Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE)

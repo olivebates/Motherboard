@@ -8,6 +8,7 @@ const ROOM_PIXEL_WIDTH := ROOM_WIDTH * TILE_SIZE
 const ROOM_PIXEL_HEIGHT := ROOM_HEIGHT * TILE_SIZE
 const CAMERA_TWEEN_DURATION := 0.25
 const CAMERA_MARGIN := Vector2(16.0, 16.0)
+const PUSH_ROOM_MARGIN := 16.0   # pushable objects stay this many px inside the room edge
 
 @onready var wall_tilemap: TileMapLayer = $Walls
 @export var pass_tilemap: TileMapLayer
@@ -647,29 +648,36 @@ func undo_last_push() -> void:
 		return
 	var from_pos: Vector2i = entry.from
 	var dir: Vector2i = entry.dir
-	if player.grid_pos == from_pos and is_blocked(from_pos - dir):
+	# Any actor (player, nanodroid, enemy) standing where the block is returning to
+	# gets shoved one tile in -dir; if that tile is blocked, the undo is refused.
+	var shoved := []
+	for actor in _push_actors():
+		if PushUtils.actor_tile(actor) == from_pos:
+			shoved.append(actor)
+	if not shoved.is_empty() and is_blocked(from_pos - dir):
 		AudioManager.play_sfx("electric_fail")
 		return
 	_last_push = null
 	_undo_push = entry
-	if player.grid_pos == from_pos:
-		var block_rect = Rect2(from_pos.x * TILE_SIZE, from_pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-		var pc = player.get_body_center()
-		const HALF := 5.0
-		var displacement = Vector2.ZERO
-		if dir.x > 0:
-			displacement.x = block_rect.position.x - (pc.x + HALF)
-		elif dir.x < 0:
-			displacement.x = block_rect.end.x - (pc.x - HALF)
-		elif dir.y > 0:
-			displacement.y = block_rect.position.y - (pc.y + HALF)
-		elif dir.y < 0:
-			displacement.y = block_rect.end.y - (pc.y - HALF)
-		if displacement != Vector2.ZERO:
-			player.push_out(displacement)
+	var block_rect = Rect2(from_pos.x * TILE_SIZE, from_pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+	for actor in shoved:
+		PushUtils.displace_actor(actor, block_rect, dir)
 	block.push_undo(from_pos)
 	_trigger_shake(0.8)
 	_update_beam()
+
+# Actors that a returning/advancing block can shove, mirroring the player.
+func _push_actors() -> Array:
+	var actors := []
+	if player != null and is_instance_valid(player):
+		actors.append(player)
+	for nd in get_tree().get_nodes_in_group("nanodroids"):
+		if is_instance_valid(nd) and not nd._destroyed:
+			actors.append(nd)
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if is_instance_valid(e) and not e.is_dead():
+			actors.append(e)
+	return actors
 
 func redo_last_push() -> void:
 	if _undo_push == null:
@@ -684,9 +692,11 @@ func redo_last_push() -> void:
 	var dest = from_pos + dir
 	if not can_push_block_to(dest):
 		return
-	if player.grid_pos == dest:
-		AudioManager.play_sfx("electric_fail")
-		return
+	# A block can't be redone onto a tile any actor is standing on.
+	for actor in _push_actors():
+		if PushUtils.actor_tile(actor) == dest:
+			AudioManager.play_sfx("electric_fail")
+			return
 	_undo_push = null
 	_last_push = entry
 	block.push(dir)
@@ -699,13 +709,17 @@ func _reset_room() -> void:
 	_resetting = true
 	player.lock_movement()
 	AudioManager.play_sfx("character_death")
-	reset_effect.play()
 	var rx0 := current_room.x * ROOM_WIDTH
 	var ry0 := current_room.y * ROOM_HEIGHT
 	for fan in get_tree().get_nodes_in_group("fans"):
 		var fgp: Vector2i = fan.start_grid_pos
 		if fgp.x >= rx0 and fgp.x < rx0 + ROOM_WIDTH and fgp.y >= ry0 and fgp.y < ry0 + ROOM_HEIGHT:
 			fan.prepare_reset()
+	# Player plays its death animation in place; the static screen kicks in after the
+	# 3rd frame and the world resets once the static has peaked.
+	player.play_death()
+	await player.death_static_cue
+	reset_effect.play()
 	await reset_effect.peaked
 	_last_push = null
 	_undo_push = null
@@ -735,6 +749,7 @@ func _reset_room() -> void:
 		var kgp: Vector2i = key.start_grid_pos
 		if kgp.x >= rx0 and kgp.x < rx0 + ROOM_WIDTH and kgp.y >= ry0 and kgp.y < ry0 + ROOM_HEIGHT:
 			key.reset()
+	var room_solved := SaveManager.is_room_solved(current_room)
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		if not is_instance_valid(enemy):
 			continue
@@ -742,7 +757,13 @@ func _reset_room() -> void:
 		if egp.x >= rx0 and egp.x < rx0 + ROOM_WIDTH and egp.y >= ry0 and egp.y < ry0 + ROOM_HEIGHT:
 			if enemy.is_in_group("boss_spawned_enemies"):
 				enemy.queue_free()
-			else:
+			elif enemy.is_in_group("bounce_enemies"):
+				# Bounce enemies don't respawn once killed, but a living one is moved
+				# back to its starting position on any room reset.
+				if not enemy.is_dead():
+					enemy.reset()
+			elif not room_solved:
+				# Other enemies do not respawn in a completed room.
 				enemy.reset()
 	for dust in get_tree().get_nodes_in_group("dust_piles"):
 		var dgp: Vector2i = dust.get_grid_pos()
@@ -772,18 +793,17 @@ func _reset_room() -> void:
 		var cgp: Vector2i = capacitor.get_grid_pos()
 		if cgp.x >= rx0 and cgp.x < rx0 + ROOM_WIDTH and cgp.y >= ry0 and cgp.y < ry0 + ROOM_HEIGHT:
 			capacitor.reset()
+	# Respawn under the static at its peak; reset_to() cuts the death animation short
+	# if it hasn't finished playing yet.
 	player.reset_to(room_entry_positions.get(current_room, Vector2i(2, 2)))
-	await reset_effect.done
+	# Reassemble at the new location by playing the death animation in reverse (3×)
+	# as the static fades, then hand control back.
+	await player.play_revive()
 	_resetting = false
 	player.unlock_movement()
 
 func tile_rect(grid_pos: Vector2i) -> Rect2:
-	return Rect2(
-		grid_pos.x * TILE_SIZE,
-		grid_pos.y * TILE_SIZE,
-		float(TILE_SIZE),
-		float(TILE_SIZE)
-	)
+	return GridUtils.tile_rect(grid_pos)
 
 func _is_static_solid(grid_pos: Vector2i, include_holes: bool = true) -> bool:
 	if wall_tilemap != null and wall_tilemap.get_cell_source_id(grid_pos) != -1:
@@ -858,7 +878,22 @@ func get_player_blocking_rects(area: Rect2, include_holes: bool = true) -> Array
 			rects.append(block_rect)
 	return rects
 
+func _within_room_push_bounds(grid_pos: Vector2i) -> bool:
+	# The block's 32×32 tile must sit fully inside its room, inset PUSH_ROOM_MARGIN px
+	# from each edge — this keeps pushables from being shoved out through doorways.
+	var room_x := floori(float(grid_pos.x) / ROOM_WIDTH)
+	var room_y := floori(float(grid_pos.y) / ROOM_HEIGHT)
+	var room_rect := Rect2(
+		WORLD_OFFSET + room_x * ROOM_PIXEL_WIDTH,
+		WORLD_OFFSET + room_y * ROOM_PIXEL_HEIGHT,
+		ROOM_PIXEL_WIDTH, ROOM_PIXEL_HEIGHT
+	)
+	var block_rect := Rect2(grid_pos.x * TILE_SIZE, grid_pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+	return room_rect.grow(-PUSH_ROOM_MARGIN).encloses(block_rect)
+
 func can_push_block_to(grid_pos: Vector2i) -> bool:
+	if not _within_room_push_bounds(grid_pos):
+		return false
 	# An empty or droid-filled hole accepts a pushable object (it sinks in).
 	var hole := _hole_at(grid_pos)
 	if hole != null and hole.can_accept_block():
@@ -874,38 +909,7 @@ func can_push_block_to(grid_pos: Vector2i) -> bool:
 	return true
 
 func get_push_block_at_face(player_rect: Rect2, dir: Vector2i, from_point: Vector2) -> Node:
-	const FACE_EPS := 0.1
-	var closest: Node = null
-	var closest_dist := INF
-	for block in get_tree().get_nodes_in_group("push_blocks"):
-		if block.is_in_group("fans"):
-			continue
-		var block_rect: Rect2 = block.get_collision_rect()
-		if dir.x > 0:
-			if absf(player_rect.end.x - block_rect.position.x) > FACE_EPS:
-				continue
-		elif dir.x < 0:
-			if absf(player_rect.position.x - block_rect.end.x) > FACE_EPS:
-				continue
-		elif dir.y > 0:
-			if absf(player_rect.end.y - block_rect.position.y) > FACE_EPS:
-				continue
-		elif absf(player_rect.position.y - block_rect.end.y) > FACE_EPS:
-			continue
-		var aligned := _rects_overlap_y(player_rect, block_rect) if dir.x != 0 else _rects_overlap_x(player_rect, block_rect)
-		if not aligned:
-			continue
-		var dist := from_point.distance_squared_to(block_rect.get_center())
-		if dist < closest_dist:
-			closest_dist = dist
-			closest = block
-	return closest
-
-func _rects_overlap_x(a: Rect2, b: Rect2) -> bool:
-	return a.position.x < b.end.x and b.position.x < a.end.x
-
-func _rects_overlap_y(a: Rect2, b: Rect2) -> bool:
-	return a.position.y < b.end.y and b.position.y < a.end.y
+	return PushUtils.block_at_face(get_tree().get_nodes_in_group("push_blocks"), player_rect, dir, from_point)
 
 func has_pass_block_at(grid_pos: Vector2i) -> bool:
 	for block in get_tree().get_nodes_in_group("pass_blocks"):
@@ -914,10 +918,7 @@ func has_pass_block_at(grid_pos: Vector2i) -> bool:
 	return false
 
 func get_push_block_at(grid_pos: Vector2i) -> Node:
-	for block in get_tree().get_nodes_in_group("push_blocks"):
-		if block.grid_pos == grid_pos:
-			return block
-	return null
+	return PushUtils.block_at(get_tree().get_nodes_in_group("push_blocks"), grid_pos)
 
 func check_room_transition(player_grid: Vector2i, player_pixel: Vector2 = Vector2.ZERO) -> void:
 	var player_room := Vector2i(
@@ -965,7 +966,11 @@ func _transition_to_room(new_room: Vector2i, auto_unlock: bool = true) -> void:
 
 	var erx0 := current_room.x * ROOM_WIDTH
 	var ery0 := current_room.y * ROOM_HEIGHT
+	# Enemies do not respawn in a completed room.
+	var entered_room_solved := SaveManager.is_room_solved(current_room)
 	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if entered_room_solved:
+			continue
 		var egp := Vector2i(floori(enemy._start_pos.x / TILE_SIZE), floori(enemy._start_pos.y / TILE_SIZE))
 		if egp.x >= erx0 and egp.x < erx0 + ROOM_WIDTH and egp.y >= ery0 and egp.y < ery0 + ROOM_HEIGHT:
 			enemy.reset()
@@ -1060,7 +1065,8 @@ func _on_teleport_requested(room: Vector2i) -> void:
 func _complete_teleport(room: Vector2i) -> void:
 	player.lock_movement()
 	await player.play_teleport()
-	AudioManager.play_sfx("electric_spawn")
+	# Teleport-pad teleport is 30% quieter (linear) than the base electric_spawn SFX.
+	AudioManager.play_sfx("electric_spawn", -3.1)
 
 	var panel := _get_open_panel_for_room(room)
 	var dest_gp: Vector2i
@@ -1089,7 +1095,7 @@ func _complete_teleport(room: Vector2i) -> void:
 func teleport_between_prongs(target_center: Vector2) -> void:
 	player.lock_movement()
 	await player.play_teleport()
-	AudioManager.play_sfx("electric_spawn")
+	AudioManager.play_sfx("electric_spawn", 0.0)
 	player.move_to_center(target_center)
 	await player.play_teleport(true)
 	player.unlock_movement()
@@ -1140,9 +1146,10 @@ func _update_beam() -> void:
 			GameManager.beam_blocked = true
 			GameManager.evaluate_puzzle()
 			electric_beam.deactivate()
-			var blocking := _get_beam_blockers(world_positions[0], world_positions[1])
-			var flashing := _expand_connected_blockers(blocking)
-			for b in get_tree().get_nodes_in_group("lightning_blockers"):
+			var all_blockers := get_tree().get_nodes_in_group("lightning_blockers")
+			var blocking := BeamUtils.beam_blockers(all_blockers, world_positions[0], world_positions[1])
+			var flashing := BeamUtils.expand_connected(all_blockers, blocking)
+			for b in all_blockers:
 				b.set_blocking(b in flashing)
 		else:
 			GameManager.beam_blocked = false
@@ -1169,83 +1176,7 @@ func _compute_beam_path(pos_a: Vector2, pos_b: Vector2) -> Array:
 
 	# Path stores Vector2 for prong endpoints and Node2D for nuts so ElectricBeam
 	# can resolve nut positions each frame and follow the sliding sprite.
-	return _nearest_first_beam(pos_a, pos_b, nut_nodes, [pos_a])
-
-# Nearest-first DFS: at each hop, try candidates (nuts + target) sorted by distance
-# from the current position, backtracking if a chosen nut leads to a dead end.
-func _nearest_first_beam(current: Vector2, target: Vector2, remaining: Array, path: Array) -> Array:
-	var candidates: Array = []
-
-	if _get_beam_blockers(current, target).is_empty():
-		candidates.append({"dist": current.distance_to(target), "is_target": true, "idx": -1})
-
-	for i in range(remaining.size()):
-		var nut_pos: Vector2 = remaining[i].get_beam_point()
-		if _get_beam_blockers(current, nut_pos).is_empty():
-			candidates.append({"dist": current.distance_to(nut_pos), "is_target": false, "idx": i})
-
-	candidates.sort_custom(func(a, b): return a["dist"] < b["dist"])
-
-	for c in candidates:
-		if c["is_target"]:
-			return path + [target]
-		var i: int = c["idx"]
-		var nut: Node2D = remaining[i]
-		var nut_pos: Vector2 = nut.get_beam_point()
-		var next_remaining := remaining.duplicate()
-		next_remaining.remove_at(i)
-		var result := _nearest_first_beam(nut_pos, target, next_remaining, path + [nut])
-		if not result.is_empty():
-			return result
-
-	return []
-
-func _expand_connected_blockers(seed: Array) -> Array:
-	if seed.is_empty():
-		return []
-	var all_blockers := get_tree().get_nodes_in_group("lightning_blockers")
-	var blocker_by_pos: Dictionary = {}
-	for b in all_blockers:
-		blocker_by_pos[b.get_grid_pos()] = b
-	var result: Array = []
-	var visited: Dictionary = {}
-	var queue: Array = seed.duplicate()
-	for b in queue:
-		visited[b] = true
-		result.append(b)
-	while not queue.is_empty():
-		var current = queue.pop_front()
-		var gp: Vector2i = current.get_grid_pos()
-		for offset in [Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1)]:
-			var neighbor_pos = gp + offset
-			if blocker_by_pos.has(neighbor_pos):
-				var neighbor = blocker_by_pos[neighbor_pos]
-				if not visited.has(neighbor):
-					visited[neighbor] = true
-					result.append(neighbor)
-					queue.append(neighbor)
-	return result
-
-func _get_beam_blockers(pos_a: Vector2, pos_b: Vector2) -> Array:
-	var blocking: Array = []
-	for b in get_tree().get_nodes_in_group("lightning_blockers"):
-		var gp = b.get_grid_pos()
-		var rect := Rect2(Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE), Vector2(TILE_SIZE, TILE_SIZE))
-		if _segment_intersects_rect(pos_a, pos_b, rect):
-			blocking.append(b)
-	return blocking
-
-func _segment_intersects_rect(a: Vector2, b: Vector2, rect: Rect2) -> bool:
-	if rect.has_point(a) or rect.has_point(b):
-		return true
-	var c := [rect.position,
-			  Vector2(rect.end.x, rect.position.y),
-			  rect.end,
-			  Vector2(rect.position.x, rect.end.y)]
-	for i in 4:
-		if Geometry2D.segment_intersects_segment(a, b, c[i], c[(i + 1) % 4]) != null:
-			return true
-	return false
+	return BeamUtils.nearest_first_beam(get_tree().get_nodes_in_group("lightning_blockers"), pos_a, pos_b, nut_nodes, [pos_a])
 
 func _world_to_grid(world_pos: Vector2) -> Vector2i:
 	return Vector2i(

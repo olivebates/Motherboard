@@ -11,7 +11,7 @@ func _ready() -> void:
 	_update_frame()
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
+	return GridUtils.to_grid(position)
 
 func reset() -> void:
 	if _active:

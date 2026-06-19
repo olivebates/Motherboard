@@ -11,7 +11,7 @@ const PARTICLE_SPEED_MAX := 65.0
 const PARTICLE_Z_INDEX := 10
 const AIRFLOW_HALF_BAND := TILE_SIZE * 0.5
 
-const PUSH_INTERVAL := 0.8
+const PUSH_INTERVAL := 0.4
 
 const SLIDE_DURATION := 0.15
 
@@ -35,7 +35,7 @@ func _ready() -> void:
 	add_to_group("fans")
 	add_to_group("push_blocks")
 	add_to_group("nuts")
-	start_grid_pos = Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
+	start_grid_pos = GridUtils.to_grid(position)
 	grid_pos = start_grid_pos
 	position = Vector2(grid_pos.x * TILE_SIZE, grid_pos.y * TILE_SIZE)
 	GameManager.register_door(self, id)
@@ -101,7 +101,7 @@ func prepare_reset() -> void:
 	_clear_particles()
 
 func get_beam_point() -> Vector2:
-	return global_position + sprite.position + Vector2(TILE_SIZE * 0.5, TILE_SIZE * 0.5)
+	return GridUtils.tile_center(global_position + sprite.position)
 
 func is_active() -> bool:
 	return _on

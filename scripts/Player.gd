@@ -9,12 +9,15 @@ const CONTACT_EPS := 0.1
 const PUSH_FREEZE := 0.15
 const PUSH_HOLD_TIME := 0.15
 const PUSH_KICK_TIME := 0.2
+const PUSH_STRAIN_FRAME_TIME = 0.4   # while pushing an immovable block, advance the pose one frame per this
 
 @export var start_with_push: bool = false
 @export var start_with_chain: bool = false
 @export var start_with_break: bool = false
 @export var save_system_enabled: bool = false
 @export var room_teleport_enabled: bool = false
+
+signal death_static_cue
 
 var movement_locked := false
 var visual_pos: Vector2
@@ -27,6 +30,8 @@ var _push_charge_block: Node = null
 var _push_pose_dir := Vector2i.ZERO   # direction of the "pressing against a block" pose (0 = none)
 var _push_kick_dir := Vector2i.ZERO   # direction of the "block just moved" kick frame
 var _push_kick_time := 0.0            # remaining time to show the kick frame
+var _push_blocked = false             # pressing into a block that can't move (object behind it)
+var _push_strain_time = 0.0           # accumulates while blocked; cycles the strain pose frame
 var _main: Node2D
 
 @onready var _body: Node2D = $Body
@@ -82,6 +87,8 @@ func _setup_animations() -> void:
 	_add_strip(frames, "push_side", "res://Sprites/player/Push_side-Sheet.webp", 32, 32, 2)
 	_add_strip(frames, "push_up",   "res://Sprites/player/Push_up-Sheet.webp",   32, 36, 2)
 	_add_strip(frames, "push_down", "res://Sprites/player/Push_down-Sheet.webp", 32, 32, 2)
+	# Death animation: 16 frames in a 4×4 grid, played once on room reset.
+	_add_sheet(frames, "death", "res://Sprites/player/Death-Sheet.webp", 4, 4, 16, 11.2, false)
 	_sprite.sprite_frames = frames
 	_sprite.play("front_idle")
 
@@ -128,7 +135,10 @@ func _update_animation(raw: Vector2, moved_x: bool, moved_y: bool) -> void:
 		_play_push(_push_kick_dir, 1)
 		return
 	if _push_pose_dir != Vector2i.ZERO:
-		_play_push(_push_pose_dir, 0)
+		var pose_frame = 0
+		if _push_blocked:
+			pose_frame = int(_push_strain_time / PUSH_STRAIN_FRAME_TIME) % 2
+		_play_push(_push_pose_dir, pose_frame)
 		return
 	var anim = _facing + ("_run" if is_moving else "_idle")
 	if _sprite.animation != anim:
@@ -166,6 +176,8 @@ func _process(delta: float) -> void:
 	if movement_locked:
 		_push_pose_dir = Vector2i.ZERO
 		_push_kick_time = 0.0
+		_push_blocked = false
+		_push_strain_time = 0.0
 		_sprite.scale = _sprite.scale.lerp(Vector2.ONE, 15.0 * delta)
 		if _sprite.animation.ends_with("_run") or _sprite.animation.begins_with("push"):
 			_sprite.play(_facing + "_idle")
@@ -198,6 +210,11 @@ func _process(delta: float) -> void:
 	var moved_y: bool = y_move.moved
 
 	var pushed := _try_push(raw, moved_x, moved_y, main, delta)
+
+	if _push_blocked:
+		_push_strain_time += delta
+	else:
+		_push_strain_time = 0.0
 
 	if _push_kick_time > 0.0:
 		_push_kick_time = maxf(0.0, _push_kick_time - delta)
@@ -297,63 +314,22 @@ func _hitbox_rect(pos: Vector2) -> Rect2:
 func _move_axis_x(pos: Vector2, dx: float, main: Node) -> Dictionary:
 	if dx == 0.0:
 		return {"pos": pos, "moved": false}
-
-	var old_rect := _hitbox_rect(pos)
-	var allowed := dx
-	var probe := old_rect.merge(_hitbox_rect(pos + Vector2(dx, 0.0)))
-
-	for solid in main.get_player_blocking_rects(probe):
-		if not _rects_overlap_y(old_rect, solid):
-			continue
-		if dx > 0.0:
-			if old_rect.end.x <= solid.position.x + CONTACT_EPS:
-				allowed = minf(allowed, solid.position.x - old_rect.end.x)
-			else:
-				allowed = 0.0
-		elif old_rect.position.x >= solid.end.x - CONTACT_EPS:
-			allowed = maxf(allowed, solid.end.x - old_rect.position.x)
-		else:
-			allowed = 0.0
-
-	if dx > 0.0:
-		allowed = clampf(allowed, 0.0, dx)
-	else:
-		allowed = clampf(allowed, dx, 0.0)
-
-	var moved := absf(allowed) > 0.001
-	return {"pos": Vector2(pos.x + allowed, pos.y), "moved": moved}
+	var old_rect = _hitbox_rect(pos)
+	var probe = old_rect.merge(_hitbox_rect(pos + Vector2(dx, 0.0)))
+	var allowed = MoveUtils.sweep_x(old_rect, dx, main.get_player_blocking_rects(probe), CONTACT_EPS)
+	return {"pos": Vector2(pos.x + allowed, pos.y), "moved": absf(allowed) > 0.001}
 
 func _move_axis_y(pos: Vector2, dy: float, main: Node) -> Dictionary:
 	if dy == 0.0:
 		return {"pos": pos, "moved": false}
-
-	var old_rect := _hitbox_rect(pos)
-	var allowed := dy
-	var probe := old_rect.merge(_hitbox_rect(pos + Vector2(0.0, dy)))
-
-	for solid in main.get_player_blocking_rects(probe):
-		if not _rects_overlap_x(old_rect, solid):
-			continue
-		if dy > 0.0:
-			if old_rect.end.y <= solid.position.y + CONTACT_EPS:
-				allowed = minf(allowed, solid.position.y - old_rect.end.y)
-			else:
-				allowed = 0.0
-		elif old_rect.position.y >= solid.end.y - CONTACT_EPS:
-			allowed = maxf(allowed, solid.end.y - old_rect.position.y)
-		else:
-			allowed = 0.0
-
-	if dy > 0.0:
-		allowed = clampf(allowed, 0.0, dy)
-	else:
-		allowed = clampf(allowed, dy, 0.0)
-
-	var moved := absf(allowed) > 0.001
-	return {"pos": Vector2(pos.x, pos.y + allowed), "moved": moved}
+	var old_rect = _hitbox_rect(pos)
+	var probe = old_rect.merge(_hitbox_rect(pos + Vector2(0.0, dy)))
+	var allowed = MoveUtils.sweep_y(old_rect, dy, main.get_player_blocking_rects(probe), CONTACT_EPS)
+	return {"pos": Vector2(pos.x, pos.y + allowed), "moved": absf(allowed) > 0.001}
 
 func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: float) -> bool:
 	_push_pose_dir = Vector2i.ZERO
+	_push_blocked = false
 	if not GameManager.has_ability("push"):
 		_push_charge_time = 0.0
 		_push_charge_dir = Vector2i.ZERO
@@ -409,6 +385,9 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: fl
 
 	var dest: Vector2i = block.grid_pos + dir
 	if not main.can_push_block_to(dest):
+		# Block is immovable (an object is behind it) — keep the straining push pose,
+		# which _update_animation cycles one frame every PUSH_STRAIN_FRAME_TIME.
+		_push_blocked = true
 		_push_charge_time = 0.0
 		_push_charge_dir = Vector2i.ZERO
 		_push_charge_block = null
@@ -466,12 +445,6 @@ func _start_push_lock(dir: Vector2i) -> void:
 	_push_tween.tween_interval(PUSH_FREEZE)
 	_push_tween.tween_callback(func(): _push_lock_dir = Vector2i.ZERO)
 
-func _rects_overlap_x(a: Rect2, b: Rect2) -> bool:
-	return a.position.x < b.end.x and b.position.x < a.end.x
-
-func _rects_overlap_y(a: Rect2, b: Rect2) -> bool:
-	return a.position.y < b.end.y and b.position.y < a.end.y
-
 func _world_to_grid(world_pos: Vector2) -> Vector2i:
 	var hitbox_center_y := world_pos.y + _body_offset.y + _hitbox_offset.y
 	return Vector2i(
@@ -503,17 +476,51 @@ func lock_movement() -> void:
 func unlock_movement() -> void:
 	movement_locked = false
 
+# Plays the death animation in place on room reset, emitting death_static_cue once the
+# 3rd frame has played (the cue for the static screen effect). The animation is cut
+# short by reset_to() when the player is respawned at the room start.
+const DEATH_STATIC_CUE_FRAME := 3   # static starts after the 3rd frame (frames 0-2) has played
+
+func play_death() -> void:
+	movement_locked = true
+	_push_pose_dir = Vector2i.ZERO
+	_push_kick_time = 0.0
+	_sprite.scale = Vector2.ONE
+	_sprite.flip_h = false
+	_sprite.speed_scale = 1.0
+	_sprite.visible = true
+	_sprite.play("death")
+	while _sprite.frame < DEATH_STATIC_CUE_FRAME:
+		await _sprite.frame_changed
+	death_static_cue.emit()
+
 func reset_to(gp: Vector2i) -> void:
 	position = _grid_to_world(gp)
 	visual_pos = position + _body_offset
 	eject_from_solid()
+	_facing = "front"
+	_sprite.speed_scale = 1.0
+	_sprite.play("front_idle")
+	_sprite.visible = true
+
+# Plays the death animation in reverse at 1× speed (starting from frame 8) to
+# reassemble the player after a room reset, then settles back into the idle pose.
+# Awaited before control resumes.
+func play_revive() -> void:
+	_facing = "front"
+	_sprite.flip_h = false
+	_sprite.scale = Vector2.ONE
+	_sprite.visible = true
+	_sprite.speed_scale = 1.0
+	_sprite.play_backwards("death")
+	_sprite.frame = 8
+	await _sprite.animation_finished
+	_sprite.speed_scale = 1.0
+	_sprite.play("front_idle")
 
 func _is_inside_solid() -> bool:
-	var rect := _hitbox_rect(position)
-	for solid in _main.get_player_blocking_rects(rect):
-		if rect.intersects(solid):
-			return true
-	return false
+	var rect = _hitbox_rect(position)
+	return MoveUtils.rect_hits_any(rect, _main.get_player_blocking_rects(rect))
 
 func move_to_center(world_center: Vector2) -> void:
 	position = YSortHitboxBottom.root_pos_from_hitbox_center(world_center, _body_offset, _hitbox_offset)
@@ -524,33 +531,22 @@ func _eject_from_solid_fine() -> void:
 	if not _is_inside_solid():
 		return
 	const STEP = 4
-	var ox = int(round(position.x / STEP)) * STEP
-	var oy = int(round(position.y / STEP)) * STEP
-	var origin = Vector2i(ox / STEP, oy / STEP)
-	var visited = { origin: true }
-	var queue: Array[Vector2i] = [origin]
-	while queue.size() > 0:
-		var gp: Vector2i = queue.pop_front()
-		var candidate = Vector2(gp.x * STEP, gp.y * STEP)
-		var rect = _hitbox_rect(candidate)
-		var blocked = false
-		for solid in _main.get_player_blocking_rects(rect):
-			if rect.intersects(solid):
-				blocked = true
-				break
-		if not blocked:
-			position = candidate
-			visual_pos = position + _body_offset
-			return
-		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-			var next = gp + d
-			if not visited.has(next):
-				visited[next] = true
-				queue.append(next)
+	var origin = Vector2i(int(round(position.x / STEP)), int(round(position.y / STEP)))
+	var is_free = func(c):
+		var rect = _hitbox_rect(Vector2(c.x * STEP, c.y * STEP))
+		return not MoveUtils.rect_hits_any(rect, _main.get_player_blocking_rects(rect))
+	var gp = MoveUtils.find_free_cell(origin, is_free)
+	if gp != null:
+		position = Vector2(gp.x * STEP, gp.y * STEP)
+		visual_pos = position + _body_offset
+
+func get_push_hitbox() -> Rect2:
+	return _hitbox_rect(position)
 
 func push_out(displacement: Vector2) -> void:
 	position += displacement
-	visual_pos = position + _body_offset
+	# Leave visual_pos where it was so the sprite lags behind and eases to the new
+	# position, instead of teleporting with the body.
 
 func look_up() -> void:
 	_facing = "back"
@@ -559,25 +555,10 @@ func look_up() -> void:
 func eject_from_solid() -> void:
 	if not _is_inside_solid():
 		return
-	var origin := grid_pos
-	var visited := {}
-	var queue: Array[Vector2i] = [origin]
-	visited[origin] = true
-	while queue.size() > 0:
-		var gp: Vector2i = queue.pop_front()
-		var candidate := _grid_to_world(gp)
-		var rect := _hitbox_rect(candidate)
-		var blocked := false
-		for solid in _main.get_player_blocking_rects(rect):
-			if rect.intersects(solid):
-				blocked = true
-				break
-		if not blocked:
-			position = candidate
-			visual_pos = position + _body_offset
-			return
-		for d in [Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1)]:
-			var next = gp + d
-			if not visited.has(next):
-				visited[next] = true
-				queue.append(next)
+	var is_free = func(c):
+		var rect = _hitbox_rect(_grid_to_world(c))
+		return not MoveUtils.rect_hits_any(rect, _main.get_player_blocking_rects(rect))
+	var gp = MoveUtils.find_free_cell(grid_pos, is_free)
+	if gp != null:
+		position = _grid_to_world(gp)
+		visual_pos = position + _body_offset

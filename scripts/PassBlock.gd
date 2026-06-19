@@ -7,4 +7,4 @@ func _ready() -> void:
 	$Sprite2D.texture = load("res://Sprites/objects/switch_open2.png")
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
+	return GridUtils.to_grid(position)

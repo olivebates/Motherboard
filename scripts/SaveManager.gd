@@ -441,17 +441,11 @@ func export_save_string() -> String:
 	var data = _build_save_data()
 	if data.is_empty():
 		return ""
-	var bytes = JSON.stringify(data).to_utf8_buffer()
-	var compressed = bytes.compress(FileAccess.COMPRESSION_DEFLATE)
-	return Marshalls.raw_to_base64(compressed)
+	return SerializeUtils.encode_dict(data)
 
 func import_save_string(encoded: String) -> bool:
-	var compressed = Marshalls.base64_to_raw(encoded)
-	var decompressed = compressed.decompress_dynamic(-1, FileAccess.COMPRESSION_DEFLATE)
-	if decompressed.size() == 0:
-		return false
-	var data = JSON.parse_string(decompressed.get_string_from_utf8())
-	if not data is Dictionary:
+	var data = SerializeUtils.decode_to_dict(encoded)
+	if data.is_empty():
 		return false
 	if active_slot == -1:
 		active_slot = 1

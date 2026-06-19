@@ -10,7 +10,7 @@ var start_grid_pos: Vector2i = Vector2i.ZERO
 func _ready() -> void:
 	add_to_group("nuts")
 	add_to_group("screws")
-	grid_pos = Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
+	grid_pos = GridUtils.to_grid(position)
 	start_grid_pos = grid_pos
 	position = _grid_to_world(grid_pos)
 	sprite.centered = false
@@ -28,7 +28,7 @@ func get_collision_rect() -> Rect2:
 	)
 
 func get_beam_point() -> Vector2:
-	return global_position + sprite.position + Vector2(TILE_SIZE * 0.5, TILE_SIZE * 0.5)
+	return GridUtils.tile_center(global_position + sprite.position)
 
 func reset() -> void:
 	grid_pos = start_grid_pos

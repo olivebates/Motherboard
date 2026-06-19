@@ -19,7 +19,7 @@ func _ready() -> void:
 	queue_redraw()
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
+	return GridUtils.to_grid(position)
 
 func get_collision_rect() -> Rect2:
 	return Rect2(position, Vector2(float(TILE_SIZE), float(TILE_SIZE)))
@@ -34,13 +34,7 @@ func _process(delta: float) -> void:
 	if player.movement_locked:
 		_contact_time = 0.0
 		return
-	var player_hitbox: Rect2 = player._hitbox_rect(player.position)
-	var panel_near: Rect2 = get_collision_rect().grow(2.0)
-	var input := Vector2(
-		Input.get_axis("move_left", "move_right"),
-		Input.get_axis("move_up", "move_down")
-	)
-	if panel_near.intersects(player_hitbox) and input.length_squared() > 0.0:
+	if PlayerUtils.is_pressing_into(get_collision_rect(), player, 2.0):
 		_contact_time += delta
 		if _contact_time >= OPEN_HOLD_TIME:
 			_open()
@@ -58,9 +52,7 @@ func _draw() -> void:
 		draw_texture(tex, Vector2.ZERO)
 
 func is_player_standing_on(player: Node2D) -> bool:
-	if not is_open:
-		return false
-	return get_collision_rect().intersects(player._hitbox_rect(player.position))
+	return is_open and PlayerUtils.standing_on(get_collision_rect(), player)
 
 func reset() -> void:
 	is_open = false

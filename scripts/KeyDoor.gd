@@ -48,7 +48,7 @@ func _count_keys() -> void:
 		_open()
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(int(position.x) / 32, int(position.y) / 32)
+	return GridUtils.to_grid(position)
 
 func key_collected() -> void:
 	_keys_collected += 1

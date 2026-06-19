@@ -229,14 +229,14 @@ func _process_hop(delta: float) -> void:
 		_wait_timer = _wait_duration
 
 func _world_to_grid(pos: Vector2) -> Vector2i:
-	return Vector2i(floori(pos.x / TILE_SIZE), floori(pos.y / TILE_SIZE))
+	return GridUtils.to_grid(pos)
 
 # Cell the enemy currently occupies (accounts for the ground-line origin shift).
 func _self_cell() -> Vector2i:
 	return _world_to_grid(position - Vector2(0.0, _ground_offset()))
 
 func _grid_to_world(gp: Vector2i) -> Vector2:
-	return Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE + _ground_offset())
+	return GridUtils.to_world(gp) + Vector2(0.0, _ground_offset())
 
 func _cell_blocked(gp: Vector2i) -> bool:
 	var cached: Variant = _blocked_cache.get(gp)

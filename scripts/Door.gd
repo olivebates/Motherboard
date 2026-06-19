@@ -1,11 +1,13 @@
 extends Node2D
 
 @export var id: String = ""
+@export var id2: String = ""
 @export var starts_open: bool = false
 
 var is_open := false
 var _opening := false
 var _anim_version := 0
+var _id_active: Dictionary = {}   # id -> bool; door opens when ANY of its ids is active
 
 @onready var sprite: AnimatedSprite2D = $AnimatedSprite2D
 
@@ -14,7 +16,8 @@ func _ready() -> void:
 	_setup_animations()
 	sprite.frame = 0
 	sprite.stop()
-	GameManager.register_door(self, id)
+	for did in _door_ids():
+		GameManager.register_door(self, did)
 	GameManager.doors_update.connect(_on_doors_update)
 	$Sprite2D.visible = false
 	if starts_open:
@@ -47,14 +50,31 @@ func _setup_animations() -> void:
 	sprite.animation = "open"
 
 func _exit_tree() -> void:
-	GameManager.unregister_door(self, id)
+	for did in _door_ids():
+		GameManager.unregister_door(self, did)
+
+# The door's ids — id, plus id2 when set (and distinct). Any one being active opens it.
+func _door_ids() -> Array:
+	var ids: Array = [id]
+	if id2 != "" and id2 != id:
+		ids.append(id2)
+	return ids
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(int(position.x) / 32, int(position.y) / 32)
+	return GridUtils.to_grid(position)
 
 func _on_doors_update(door_id: String, open: bool) -> void:
-	if door_id == id:
-		set_open(open)
+	if door_id not in _door_ids():
+		return
+	_id_active[door_id] = open
+	# Open when any of the door's ids is active (OR), matching how floor panels work.
+	set_open(_any_id_active())
+
+func _any_id_active() -> bool:
+	for did in _door_ids():
+		if _id_active.get(did, false):
+			return true
+	return false
 
 func _get_room() -> Vector2i:
 	var gp = get_grid_pos()

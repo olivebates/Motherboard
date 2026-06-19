@@ -37,7 +37,7 @@ var _consumed_blocks: Array = []
 func _ready() -> void:
 	add_to_group("holes")
 	_main = get_tree().current_scene
-	start_grid_pos = Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
+	start_grid_pos = GridUtils.to_grid(position)
 	grid_pos = start_grid_pos
 	position = Vector2(grid_pos.x * TILE_SIZE, grid_pos.y * TILE_SIZE)
 	sprite.centered = false

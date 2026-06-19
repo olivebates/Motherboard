@@ -19,7 +19,7 @@ var _highlight_time := 0.0
 
 func _ready() -> void:
 	add_to_group("push_blocks")
-	start_grid_pos = Vector2i(floori(position.x / TILE_SIZE), floori(position.y / TILE_SIZE))
+	start_grid_pos = GridUtils.to_grid(position)
 	grid_pos = start_grid_pos
 	position = _grid_to_world(grid_pos)
 	sprite.centered = false

@@ -14,7 +14,7 @@ const HIGHLIGHT_BASE_OFFSET := 3.0
 
 func _ready() -> void:
 	add_to_group("floor_panels")
-	var gp := Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
+	var gp = GridUtils.to_grid(position)
 	GameManager.register_floor_panel(gp, id, id2)
 	if positive:
 		$Sprite2D.texture = load("res://Sprites/objects/positive.png")

@@ -59,7 +59,7 @@ func snap_to(target: Vector2) -> void:
 # Register as a floor panel at the current tile (re-registering when relocated) so
 # the prongs/beam drive the "bounceboss" id through the normal puzzle evaluation.
 func _register_panel() -> void:
-	var gp := Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
+	var gp = GridUtils.to_grid(position)
 	if _registered_gp == gp:
 		return
 	if _registered_gp != null:

@@ -23,10 +23,10 @@ func _ready() -> void:
 	_apply_frame()
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
+	return GridUtils.to_grid(position)
 
 func get_center() -> Vector2:
-	return position + Vector2(16.0, 16.0)
+	return GridUtils.tile_center(position)
 
 func reset() -> void:
 	_progress = 0.0

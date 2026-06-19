@@ -119,6 +119,9 @@ var _drag_placing: bool = false
 var _drag_deleting: bool = false
 var _drag_visited: Array = []
 
+# Keyboard delete (holding X deletes under the cursor like a right-click drag)
+var _x_deleting: bool = false
+
 # Floor tile batching — grows during drag, flushed on release
 var _floor_paint_batch: Array[Vector2i] = []
 var _floor_erase_batch: Array[Vector2i] = []
@@ -469,6 +472,9 @@ func _set_mode(new_mode: int) -> void:
 	ghost_sprite.visible = false
 	_drag_placing = false
 	_drag_deleting = false
+	if _x_deleting:
+		_x_deleting = false
+		_commit_drag_undo_batch()
 	_floor_paint_batch.clear()
 	_floor_erase_batch.clear()
 	if _obj_drag_node != null and is_instance_valid(_obj_drag_node):
@@ -521,6 +527,10 @@ func _process(_delta: float) -> void:
 
 	_update_space_label()
 
+	# Holding X deletes whatever is under the cursor, like a right-click drag
+	if _process_x_delete():
+		return
+
 	# Object/wall drag (BUILD or PLACING mode)
 	if (mode == Mode.BUILD or mode == Mode.PLACING) and _is_dragging():
 		_process_obj_drag()
@@ -544,6 +554,25 @@ func _process(_delta: float) -> void:
 
 	if _drag_placing or _drag_deleting:
 		_handle_drag_at(gp)
+
+func _process_x_delete() -> bool:
+	# While X is held (BUILD/PLACING, not wire mode), delete the tile under the
+	# cursor each frame — same behavior as holding right-click. Returns true while
+	# active so _process skips ghost/drag handling.
+	var held = Input.is_key_pressed(KEY_X) and mode != Mode.PLAY and not _wire_mode \
+			and not _is_dragging() and not _drag_placing and not _drag_deleting
+	if held:
+		if not _x_deleting:
+			_x_deleting = true
+			_begin_drag_undo_batch()
+		_delete_at(world_to_grid(get_global_mouse_position()))
+		ghost_sprite.visible = false
+		return true
+	if _x_deleting:
+		_x_deleting = false
+		_commit_drag_undo_batch()
+		_flush_floor_batches()
+	return false
 
 # ──────────────────────────────────────────────
 #  Input
@@ -589,7 +618,7 @@ func _input(event: InputEvent) -> void:
 			if mode != Mode.PLAY:
 				_undo_last_action()
 				get_viewport().set_input_as_handled()
-		KEY_F:
+		KEY_C:
 			if mode != Mode.PLAY:
 				_eyedropper_at(world_to_grid(get_global_mouse_position()))
 				get_viewport().set_input_as_handled()
@@ -666,25 +695,11 @@ func _flush_floor_batches() -> void:
 		_floor_erase_batch.clear()
 
 func _handle_drag_at(gp: Vector2i) -> void:
-	# Floor tiles: accumulate batch and call terrain connect incrementally
-	if selected_type == "Wires":
-		if gp.x >= 0 and gp.x < PLAY_COLS and gp.y >= 0 and gp.y < PLAY_ROWS:
-			if _drag_placing and not (gp in _floor_paint_batch):
-				_floor_paint_batch.append(gp)
-				# Use ALL existing cells + new cell so neighbors outside the current drag are considered
-				var all_cells: Array[Vector2i] = floor_tilemap.get_used_cells()
-				if not (gp in all_cells):
-					all_cells.append(gp)
-				floor_tilemap.set_cells_terrain_connect(all_cells, 0, 0)
-				# match_sides needs neighbors; if isolated cell got no tile, force a fallback
-				if floor_tilemap.get_cell_source_id(gp) == -1:
-					floor_tilemap.set_cell(gp, 0, Vector2i(2, 0))
-			elif _drag_deleting and not (gp in _floor_erase_batch):
-				_floor_erase_batch.append(gp)
-				floor_tilemap.set_cells_terrain_connect(_floor_erase_batch, 0, -1)
-		return
-
 	if _drag_placing:
+		# Floor tiles: accumulate batch and call terrain connect incrementally
+		if selected_type == "Wires":
+			_place_floor_at(gp)
+			return
 		if gp in _drag_visited:
 			return
 		_drag_visited.append(gp)
@@ -694,17 +709,50 @@ func _handle_drag_at(gp: Vector2i) -> void:
 			# Objects drag-paint once per empty tile; _place_object skips occupied tiles
 			_place_object(selected_type, gp)
 	elif _drag_deleting:
-		# Delete whatever is at the cell, regardless of the selected tool:
-		# objects first, then walls, then the player spawn marker
-		var existing = _object_at(gp)
-		if existing:
-			_delete_object(existing)
-		elif walls_tilemap.get_cell_source_id(gp) >= 0:
-			walls_tilemap.erase_cell(gp)
-			_push_undo({"kind": "wall", "col": gp.x, "row": gp.y, "placed": false})
-		elif player_spawn_pos == gp:
-			player_spawn_pos = Vector2i(-1, -1)
-			player_marker.visible = false
+		_delete_at(gp)
+
+func _place_floor_at(gp: Vector2i) -> void:
+	if gp.x < 0 or gp.x >= PLAY_COLS or gp.y < 0 or gp.y >= PLAY_ROWS:
+		return
+	if gp in _floor_paint_batch:
+		return
+	var had_floor = floor_tilemap.get_cell_source_id(gp) >= 0
+	_floor_paint_batch.append(gp)
+	# Use ALL existing cells + new cell so neighbors outside the current drag are considered
+	var all_cells: Array[Vector2i] = floor_tilemap.get_used_cells()
+	if not (gp in all_cells):
+		all_cells.append(gp)
+	floor_tilemap.set_cells_terrain_connect(all_cells, 0, 0)
+	# match_sides needs neighbors; if isolated cell got no tile, force a fallback
+	if floor_tilemap.get_cell_source_id(gp) == -1:
+		floor_tilemap.set_cell(gp, 0, Vector2i(2, 0))
+	if not had_floor:
+		_push_undo({"kind": "floor", "col": gp.x, "row": gp.y, "placed": true})
+
+func _erase_floor_at(gp: Vector2i) -> void:
+	if gp in _floor_erase_batch:
+		return
+	var had_floor = floor_tilemap.get_cell_source_id(gp) >= 0
+	_floor_erase_batch.append(gp)
+	floor_tilemap.set_cells_terrain_connect(_floor_erase_batch, 0, -1)
+	if had_floor:
+		_push_undo({"kind": "floor", "col": gp.x, "row": gp.y, "placed": false})
+
+func _delete_at(gp: Vector2i) -> void:
+	# Delete whatever is at the cell, regardless of the selected tool:
+	# objects first, then walls, then floor wires, then the player spawn marker
+	var existing = _object_at(gp)
+	if existing:
+		_delete_object(existing)
+	elif walls_tilemap.get_cell_source_id(gp) >= 0:
+		walls_tilemap.erase_cell(gp)
+		_push_undo({"kind": "wall", "col": gp.x, "row": gp.y, "placed": false})
+	elif gp.x >= 0 and gp.x < PLAY_COLS and gp.y >= 0 and gp.y < PLAY_ROWS \
+			and floor_tilemap.get_cell_source_id(gp) >= 0:
+		_erase_floor_at(gp)
+	elif player_spawn_pos == gp:
+		player_spawn_pos = Vector2i(-1, -1)
+		player_marker.visible = false
 
 func _handle_build_click(mb: InputEventMouseButton) -> void:
 	# Finalize drag on left release (allow outside bounds)
@@ -744,10 +792,10 @@ func _enter_placing_from_build(is_delete: bool, gp: Vector2i) -> void:
 #  Object / tile placement
 # ──────────────────────────────────────────────
 func world_to_grid(wp: Vector2) -> Vector2i:
-	return Vector2i(floori(wp.x / TILE_SIZE), floori(wp.y / TILE_SIZE))
+	return GridUtils.to_grid(wp)
 
 func grid_to_world(gp: Vector2i) -> Vector2:
-	return Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE)
+	return GridUtils.to_world(gp)
 
 func _object_at(gp: Vector2i) -> Node:
 	# Returns the last-added (top-most) object at this grid position
@@ -1147,20 +1195,10 @@ func _on_load_pressed() -> void:
 	dialog.queue_free()
 
 func _encode_level_data(data: Dictionary) -> String:
-	var json_str = JSON.stringify(data)
-	var bytes = json_str.to_utf8_buffer()
-	var compressed = bytes.compress(FileAccess.COMPRESSION_DEFLATE)
-	return Marshalls.raw_to_base64(compressed)
+	return SerializeUtils.encode_dict(data)
 
 func _decode_level_string(encoded: String) -> Dictionary:
-	var compressed = Marshalls.base64_to_raw(encoded)
-	var decompressed = compressed.decompress_dynamic(-1, FileAccess.COMPRESSION_DEFLATE)
-	if decompressed.size() == 0:
-		return {}
-	var data = JSON.parse_string(decompressed.get_string_from_utf8())
-	if data == null:
-		return {}
-	return data
+	return SerializeUtils.decode_to_dict(encoded)
 
 func _on_export_pressed() -> void:
 	var data = _build_level_data()
@@ -1214,7 +1252,7 @@ func _on_import_pressed() -> void:
 var current_room: Vector2i = Vector2i(0, 0)
 
 func tile_rect(gp: Vector2i) -> Rect2:
-	return Rect2(gp.x * TILE_SIZE, gp.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+	return GridUtils.tile_rect(gp)
 
 func _is_static_solid(gp: Vector2i, include_holes: bool = true) -> bool:
 	if walls_tilemap == null: return false
@@ -1299,27 +1337,10 @@ func can_push_block_to(gp: Vector2i) -> bool:
 	return not _is_static_solid(gp) and get_push_block_at(gp) == null and not has_pass_block_at(gp)
 
 func get_push_block_at(gp: Vector2i) -> Node:
-	for block in get_tree().get_nodes_in_group("push_blocks"):
-		if block.grid_pos == gp: return block
-	return null
+	return PushUtils.block_at(get_tree().get_nodes_in_group("push_blocks"), gp)
 
 func get_push_block_at_face(player_rect: Rect2, dir: Vector2i, from_point: Vector2) -> Node:
-	const FACE_EPS = 0.1
-	var closest: Node = null
-	var closest_dist = INF
-	for block in get_tree().get_nodes_in_group("push_blocks"):
-		if not block.has_method("get_collision_rect"): continue
-		if block.is_in_group("fans"): continue
-		var br: Rect2 = block.get_collision_rect()
-		if dir.x > 0 and absf(player_rect.end.x - br.position.x) > FACE_EPS: continue
-		elif dir.x < 0 and absf(player_rect.position.x - br.end.x) > FACE_EPS: continue
-		elif dir.y > 0 and absf(player_rect.end.y - br.position.y) > FACE_EPS: continue
-		elif dir.y < 0 and absf(player_rect.position.y - br.end.y) > FACE_EPS: continue
-		var dist = from_point.distance_squared_to(br.get_center())
-		if dist < closest_dist:
-			closest_dist = dist
-			closest = block
-	return closest
+	return PushUtils.block_at_face(get_tree().get_nodes_in_group("push_blocks"), player_rect, dir, from_point)
 
 func check_room_transition(_player_grid: Vector2i, _player_pixel: Vector2 = Vector2.ZERO) -> void: pass
 func _trigger_shake(_strength: float) -> void: pass
@@ -1444,12 +1465,16 @@ func _update_space_label() -> void:
 		_space_label.position = screen_pos - Vector2(_space_label.size.x * 0.5, 0.0)
 
 func _eyedropper_at(gp: Vector2i) -> void:
-	# Pick the type under the cursor and switch into placement mode with it selected
+	# Pick the type under the cursor and switch into placement mode with it selected.
+	# An object on top of a wire is preferred over the wire itself.
 	var obj = _object_at(gp)
 	if obj != null:
 		_select_type(_type_of(obj))
 	elif walls_tilemap.get_cell_source_id(gp) >= 0:
 		_select_type("Wall")
+	elif gp.x >= 0 and gp.x < PLAY_COLS and gp.y >= 0 and gp.y < PLAY_ROWS \
+			and floor_tilemap.get_cell_source_id(gp) >= 0:
+		_select_type("Wires")
 
 func spawn_prong(pixel_pos: Vector2) -> void:
 	AudioManager.play_sfx("plant_stake")
@@ -1476,9 +1501,10 @@ func _update_beam() -> void:
 			GameManager.beam_blocked = true
 			GameManager.evaluate_puzzle()
 			_play_beam.deactivate()
-			var blocking = _get_beam_blockers(world_positions[0], world_positions[1])
-			var flashing = _expand_connected_blockers(blocking)
-			for b in get_tree().get_nodes_in_group("lightning_blockers"):
+			var all_blockers = get_tree().get_nodes_in_group("lightning_blockers")
+			var blocking = BeamUtils.beam_blockers(all_blockers, world_positions[0], world_positions[1])
+			var flashing = BeamUtils.expand_connected(all_blockers, blocking)
+			for b in all_blockers:
 				b.set_blocking(b in flashing)
 		else:
 			GameManager.beam_blocked = false
@@ -1512,63 +1538,7 @@ func _compute_beam_path(pos_a: Vector2, pos_b: Vector2) -> Array:
 	if GameManager.has_ability("chain"):
 		for nut in get_tree().get_nodes_in_group("nuts"):
 			nut_nodes.append(nut)
-	return _nearest_first_beam(pos_a, pos_b, nut_nodes, [pos_a])
-
-func _nearest_first_beam(current: Vector2, target: Vector2, remaining: Array, path: Array) -> Array:
-	var candidates: Array = []
-	if _get_beam_blockers(current, target).is_empty():
-		candidates.append({"dist": current.distance_to(target), "is_target": true, "idx": -1})
-	for i in range(remaining.size()):
-		var nut_pos: Vector2 = remaining[i].get_beam_point()
-		if _get_beam_blockers(current, nut_pos).is_empty():
-			candidates.append({"dist": current.distance_to(nut_pos), "is_target": false, "idx": i})
-	candidates.sort_custom(func(a, b): return a["dist"] < b["dist"])
-	for c in candidates:
-		if c["is_target"]:
-			return path + [target]
-		var i: int = c["idx"]
-		var nut: Node2D = remaining[i]
-		var nut_pos: Vector2 = nut.get_beam_point()
-		var next_remaining = remaining.duplicate()
-		next_remaining.remove_at(i)
-		var result = _nearest_first_beam(nut_pos, target, next_remaining, path + [nut])
-		if not result.is_empty():
-			return result
-	return []
-
-func _get_beam_blockers(pos_a: Vector2, pos_b: Vector2) -> Array:
-	var blocking: Array = []
-	for b in get_tree().get_nodes_in_group("lightning_blockers"):
-		var gp = b.get_grid_pos()
-		var rect = Rect2(Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE), Vector2(TILE_SIZE, TILE_SIZE))
-		if _segment_intersects_rect(pos_a, pos_b, rect):
-			blocking.append(b)
-	return blocking
-
-func _expand_connected_blockers(seed: Array) -> Array:
-	if seed.is_empty():
-		return []
-	var blocker_by_pos: Dictionary = {}
-	for b in get_tree().get_nodes_in_group("lightning_blockers"):
-		blocker_by_pos[b.get_grid_pos()] = b
-	var result: Array = []
-	var visited: Dictionary = {}
-	var queue: Array = seed.duplicate()
-	for b in queue:
-		visited[b] = true
-		result.append(b)
-	while not queue.is_empty():
-		var current = queue.pop_front()
-		var gp: Vector2i = current.get_grid_pos()
-		for offset in [Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1)]:
-			var neighbor_pos = gp + offset
-			if blocker_by_pos.has(neighbor_pos):
-				var neighbor = blocker_by_pos[neighbor_pos]
-				if not visited.has(neighbor):
-					visited[neighbor] = true
-					result.append(neighbor)
-					queue.append(neighbor)
-	return result
+	return BeamUtils.nearest_first_beam(get_tree().get_nodes_in_group("lightning_blockers"), pos_a, pos_b, nut_nodes, [pos_a])
 
 # ──────────────────────────────────────────────
 #  Wire mode helpers
@@ -1666,18 +1636,6 @@ func _wire_nearest_neighbor(points: Array) -> Array:
 		return a.y < b.y)
 	return sorted
 
-func _segment_intersects_rect(a: Vector2, b: Vector2, rect: Rect2) -> bool:
-	if rect.has_point(a) or rect.has_point(b):
-		return true
-	var c = [rect.position,
-			  Vector2(rect.end.x, rect.position.y),
-			  rect.end,
-			  Vector2(rect.position.x, rect.end.y)]
-	for i in 4:
-		if Geometry2D.segment_intersects_segment(a, b, c[i], c[(i + 1) % 4]) != null:
-			return true
-	return false
-
 # ──────────────────────────────────────────────
 #  Undo system
 # ──────────────────────────────────────────────
@@ -1715,6 +1673,18 @@ func _apply_undo_entry(entry: Dictionary) -> void:
 				walls_tilemap.erase_cell(gp)
 			else:
 				walls_tilemap.set_cell(gp, WALL_SOURCE_ID, Vector2i(0, 0))
+		"floor":
+			var gp = Vector2i(entry.col, entry.row)
+			if entry.placed:
+				floor_tilemap.set_cells_terrain_connect([gp], 0, -1)
+			else:
+				# Restore the erased floor cell, reconnecting it to its neighbors
+				var all_cells: Array[Vector2i] = floor_tilemap.get_used_cells()
+				if not (gp in all_cells):
+					all_cells.append(gp)
+				floor_tilemap.set_cells_terrain_connect(all_cells, 0, 0)
+				if floor_tilemap.get_cell_source_id(gp) == -1:
+					floor_tilemap.set_cell(gp, 0, Vector2i(2, 0))
 		"place_obj":
 			if is_instance_valid(entry.node):
 				_delete_object_no_undo(entry.node)

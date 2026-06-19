@@ -3,7 +3,8 @@ extends CanvasLayer
 signal peaked
 signal done
 
-const FADE_IN := 0.28
+const FADE_IN := 0.56
+const HOLD := 0.3        # time held at full opacity before fading out
 const FADE_OUT := 0.22
 
 var color: Color = Color.WHITE
@@ -82,7 +83,7 @@ func play() -> void:
 	_tween = create_tween()
 	_tween.tween_method(func(v: float): _mat.set_shader_parameter("progress", v), 0.0, 1.0, FADE_IN)
 	_tween.tween_callback(func(): peaked.emit())
-	_tween.tween_interval(0.2)
+	_tween.tween_interval(HOLD)
 	_tween.tween_method(func(v: float): _mat.set_shader_parameter("progress", v), 1.0, 0.0, FADE_OUT)
 	_tween.tween_callback(func(): _rect.visible = false; _active = false; done.emit())
 

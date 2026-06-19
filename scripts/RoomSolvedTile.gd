@@ -15,7 +15,7 @@ func _get_room() -> Vector2i:
 	return Vector2i(floori(float(gp.x) / 25.0), floori(float(gp.y) / 12.0))
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
+	return GridUtils.to_grid(position)
 
 func _process(_delta: float) -> void:
 	if _triggered:

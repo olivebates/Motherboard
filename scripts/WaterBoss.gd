@@ -71,36 +71,16 @@ func _scaled_hitbox() -> Rect2:
 func _move_x(dx: float) -> void:
 	if dx == 0.0:
 		return
-	var rect := _scaled_hitbox()
-	var probe := rect.merge(Rect2(rect.position + Vector2(dx, 0.0), rect.size))
-	var allowed := dx
-	for solid in _main.get_player_blocking_rects(probe):
-		if rect.position.y >= solid.end.y or solid.position.y >= rect.end.y:
-			continue
-		if dx > 0.0 and rect.end.x <= solid.position.x + CONTACT_EPS:
-			allowed = minf(allowed, solid.position.x - rect.end.x)
-		elif dx < 0.0 and rect.position.x >= solid.end.x - CONTACT_EPS:
-			allowed = maxf(allowed, solid.end.x - rect.position.x)
-		else:
-			allowed = 0.0
-	position.x += clampf(allowed, minf(dx, 0.0), maxf(dx, 0.0))
+	var rect = _scaled_hitbox()
+	var probe = rect.merge(Rect2(rect.position + Vector2(dx, 0.0), rect.size))
+	position.x += MoveUtils.sweep_x(rect, dx, _main.get_player_blocking_rects(probe), CONTACT_EPS)
 
 func _move_y(dy: float) -> void:
 	if dy == 0.0:
 		return
-	var rect := _scaled_hitbox()
-	var probe := rect.merge(Rect2(rect.position + Vector2(0.0, dy), rect.size))
-	var allowed := dy
-	for solid in _main.get_player_blocking_rects(probe):
-		if rect.position.x >= solid.end.x or solid.position.x >= rect.end.x:
-			continue
-		if dy > 0.0 and rect.end.y <= solid.position.y + CONTACT_EPS:
-			allowed = minf(allowed, solid.position.y - rect.end.y)
-		elif dy < 0.0 and rect.position.y >= solid.end.y - CONTACT_EPS:
-			allowed = maxf(allowed, solid.end.y - rect.position.y)
-		else:
-			allowed = 0.0
-	position.y += clampf(allowed, minf(dy, 0.0), maxf(dy, 0.0))
+	var rect = _scaled_hitbox()
+	var probe = rect.merge(Rect2(rect.position + Vector2(0.0, dy), rect.size))
+	position.y += MoveUtils.sweep_y(rect, dy, _main.get_player_blocking_rects(probe), CONTACT_EPS)
 
 # ── Main process ──────────────────────────────────────────────────────────────
 

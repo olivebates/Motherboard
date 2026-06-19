@@ -2,7 +2,7 @@ extends Node2D
 
 var grid_pos: Vector2i:
 	get:
-		return Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
+		return GridUtils.to_grid(position)
 
 @onready var _body: Node2D = $Body
 @onready var _sprite: Sprite2D = $Body/Sprite2D

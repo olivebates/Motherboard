@@ -14,10 +14,10 @@ func _ready() -> void:
 	add_to_group("breakable_walls")
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
+	return GridUtils.to_grid(position)
 
 func get_center() -> Vector2:
-	return position + Vector2(16.0, 16.0)
+	return GridUtils.tile_center(position)
 
 func reset() -> void:
 	if SaveManager.is_breakable_destroyed(get_grid_pos()):
@@ -54,22 +54,11 @@ func _process(delta: float) -> void:
 			node.queue_free()
 
 func _explode() -> void:
-	var particles := CPUParticles2D.new()
-	particles.position = get_center()
-	particles.z_index = 10
-	particles.emitting = true
-	particles.one_shot = true
-	particles.explosiveness = 1.0
-	particles.amount = 24
-	particles.lifetime = 0.6
-	particles.initial_velocity_min = 40.0
-	particles.initial_velocity_max = 120.0
-	particles.gravity = Vector2(0, 200)
-	particles.scale_amount_min = 2.0
-	particles.scale_amount_max = 4.0
-	particles.color = Color(1.0, 1.0, 1.0, 1.0)
-	get_tree().current_scene.add_child(particles)
-	get_tree().create_timer(particles.lifetime + 0.1).timeout.connect(particles.queue_free)
+	EffectUtils.spawn_burst(get_tree().current_scene, get_center(), {
+		"amount": 24, "lifetime": 0.6,
+		"velocity_min": 40.0, "velocity_max": 120.0,
+		"gravity": Vector2(0, 200), "scale_min": 2.0, "scale_max": 4.0,
+	})
 
 	_destroyed = true
 	sprite.visible = false

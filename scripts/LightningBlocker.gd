@@ -17,7 +17,7 @@ func _ready() -> void:
 	queue_redraw()
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(floori(position.x / 32.0), floori(position.y / 32.0))
+	return GridUtils.to_grid(position)
 
 func set_blocking(blocking: bool) -> void:
 	if _is_blocking == blocking:

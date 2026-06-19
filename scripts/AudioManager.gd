@@ -118,10 +118,13 @@ func _apply_sfx_volume(v: float) -> void:
 	if _sfx_bus_idx >= 0:
 		AudioServer.set_bus_volume_db(_sfx_bus_idx, linear_to_db(v) if v > 0.001 else -80.0)
 
-func play_sfx(key: String) -> void:
+func play_sfx(key: String, volume_db := INF) -> void:
 	if _sfx_muted:
 		return
 	if _sfx.has(key):
+		# INF = leave the player's configured base volume untouched.
+		if volume_db != INF:
+			_sfx[key].volume_db = volume_db
 		_sfx[key].play()
 
 func start_beam_noise() -> void:

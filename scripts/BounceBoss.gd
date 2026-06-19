@@ -409,10 +409,10 @@ func _is_walkable_boss(gp: Vector2i) -> bool:
 	return not _cell_blocked(gp)
 
 func _world_to_grid(pos: Vector2) -> Vector2i:
-	return Vector2i(floori(pos.x / TILE_SIZE), floori(pos.y / TILE_SIZE))
+	return GridUtils.to_grid(pos)
 
 func _grid_to_world(gp: Vector2i) -> Vector2:
-	return Vector2(float(gp.x) * TILE_SIZE, float(gp.y) * TILE_SIZE)
+	return GridUtils.to_world(gp)
 
 # ── Visual ────────────────────────────────────────────────────────────────────
 

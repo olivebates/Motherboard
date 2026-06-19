@@ -117,19 +117,7 @@ func is_rect_on_beam(rect: Rect2) -> bool:
 	if resolved.size() < 2:
 		return false
 	for i in range(resolved.size() - 1):
-		if _segment_intersects_rect(resolved[i], resolved[i + 1], rect):
-			return true
-	return false
-
-func _segment_intersects_rect(a: Vector2, b: Vector2, rect: Rect2) -> bool:
-	if rect.has_point(a) or rect.has_point(b):
-		return true
-	var c := [rect.position,
-			  Vector2(rect.end.x, rect.position.y),
-			  rect.end,
-			  Vector2(rect.position.x, rect.end.y)]
-	for i in 4:
-		if Geometry2D.segment_intersects_segment(a, b, c[i], c[(i + 1) % 4]) != null:
+		if BeamUtils.segment_intersects_rect(resolved[i], resolved[i + 1], rect):
 			return true
 	return false
 

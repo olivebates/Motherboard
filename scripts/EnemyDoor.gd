@@ -14,7 +14,7 @@ func _ready() -> void:
 	add_to_group("enemy_doors")
 
 func get_grid_pos() -> Vector2i:
-	return Vector2i(int(position.x) / 32, int(position.y) / 32)
+	return GridUtils.to_grid(position)
 
 func _process(_delta: float) -> void:
 	if is_open or _opening or id == "":
