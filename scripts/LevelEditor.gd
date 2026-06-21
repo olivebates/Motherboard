@@ -26,6 +26,7 @@ const SCENE_MAP = {
 	"Door":             "res://scenes/objects/Door.tscn",
 	"FloorPanel":       "res://scenes/objects/FloorPanel.tscn",
 	"FloorPanelNeg":    "res://scenes/objects/FloorPanel.tscn",
+	"FloorSwitch":      "res://scenes/objects/FloorSwitch.tscn",
 	"KeyDoor":          "res://scenes/objects/KeyDoor.tscn",
 	"Key":              "res://scenes/objects/Key.tscn",
 	"FanRight":         "res://scenes/objects/FanRight.tscn",
@@ -57,6 +58,7 @@ const PALETTE_SPRITES = {
 	"Door":             "res://Sprites/objects/door.webp",
 	"FloorPanel":       "res://Sprites/objects/positive.png",
 	"FloorPanelNeg":    "res://Sprites/objects/negative.png",
+	"FloorSwitch":      "res://Sprites/objects/Switch-Sheet.webp",
 	"KeyDoor":          "res://Sprites/objects/KeyDoor.webp",
 	"Key":              "res://Sprites/objects/Key_File.webp",
 	"FanRight":         "res://Sprites/objects/Fan_Right.png",
@@ -136,6 +138,8 @@ var _play_player: Node = null
 var _play_beam: Node = null
 var _play_spawn_pos: Vector2i = Vector2i(2, 2)
 var _play_label: Label = null
+# Bottom-left editing controls hint (Z/X/C), shown while placing in BUILD/PLACING
+var _controls_label: Label = null
 var _play_auto_save_data: Dictionary = {}
 
 var _music_btn: Button
@@ -225,10 +229,10 @@ func _setup_play_label() -> void:
 	_play_label.anchor_bottom = 1.0
 	_play_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_play_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_play_label.offset_left = -160
-	_play_label.offset_right = -8
-	_play_label.offset_top = -26
-	_play_label.offset_bottom = -8
+	_play_label.offset_left = -172
+	_play_label.offset_right = -20
+	_play_label.offset_top = -38
+	_play_label.offset_bottom = -20
 	editor_ui.add_child(_play_label)
 
 	# "SPACE" prompt above the player while standing on an open ExitPoint
@@ -240,6 +244,25 @@ func _setup_play_label() -> void:
 	_space_label.add_theme_constant_override("outline_size", 2)
 	_space_label.add_theme_font_size_override("font_size", 11)
 	editor_ui.add_child(_space_label)
+
+	# Bottom-left editing controls hint (visible while placing, hidden during playtest)
+	_controls_label = Label.new()
+	_controls_label.text = "Z: Undo\nX: Delete\nC: Copy Tile"
+	_controls_label.add_theme_color_override("font_color", Color.WHITE)
+	_controls_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_controls_label.add_theme_constant_override("outline_size", 2)
+	_controls_label.add_theme_font_size_override("font_size", 12)
+	_controls_label.anchor_left = 0.0
+	_controls_label.anchor_right = 0.0
+	_controls_label.anchor_top = 1.0
+	_controls_label.anchor_bottom = 1.0
+	_controls_label.grow_horizontal = Control.GROW_DIRECTION_END
+	_controls_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_controls_label.offset_left = 20
+	_controls_label.offset_right = 160
+	_controls_label.offset_top = -76
+	_controls_label.offset_bottom = -20
+	editor_ui.add_child(_controls_label)
 
 func _ready() -> void:
 	AudioManager.set_music("LevelEditor")
@@ -524,6 +547,11 @@ func _process(_delta: float) -> void:
 
 	if _wire_mode and mode != Mode.PLAY:
 		grid_overlay.queue_redraw()
+
+	if _controls_label:
+		# Only while actively placing tiles (PLACING) — not when the palette is open
+		# (BUILD), in wire mode, or playtesting.
+		_controls_label.visible = mode == Mode.PLACING and not _wire_mode
 
 	_update_space_label()
 
@@ -1344,6 +1372,14 @@ func get_push_block_at_face(player_rect: Rect2, dir: Vector2i, from_point: Vecto
 
 func check_room_transition(_player_grid: Vector2i, _player_pixel: Vector2 = Vector2.ZERO) -> void: pass
 func _trigger_shake(_strength: float) -> void: pass
+
+# Prong-to-prong teleport (player presses X near a prong). Shares Main's sequence
+# so the X action doesn't error out during a playtest, where _main is the editor.
+func teleport_between_prongs(target_center: Vector2) -> void:
+	if _play_player == null or not is_instance_valid(_play_player):
+		return
+	await PlayerUtils.teleport_between_prongs(_play_player, target_center)
+
 func shoot_door_ball(_from: Vector2, _to: Vector2, callback: Callable) -> void: callback.call()
 func record_push(_block, _from_pos: Vector2i, _dir: Vector2i) -> void: pass
 
@@ -1478,6 +1514,8 @@ func _eyedropper_at(gp: Vector2i) -> void:
 
 func spawn_prong(pixel_pos: Vector2) -> void:
 	AudioManager.play_sfx("plant_stake")
+	# Swing the hammer first; the prong is only placed once the animation ends.
+	await player.play_plant()
 	if GameManager.prongs.size() >= 2:
 		var oldest = GameManager.prongs[0]
 		GameManager.remove_prong(oldest["node"])
@@ -1495,29 +1533,10 @@ func _update_beam() -> void:
 	if _play_beam == null or not is_instance_valid(_play_beam):
 		return
 	var world_positions = GameManager.get_prong_world_positions()
+	var path: Array = []
 	if world_positions.size() == 2:
-		var path = _compute_beam_path(world_positions[0], world_positions[1])
-		if path.is_empty():
-			GameManager.beam_blocked = true
-			GameManager.evaluate_puzzle()
-			_play_beam.deactivate()
-			var all_blockers = get_tree().get_nodes_in_group("lightning_blockers")
-			var blocking = BeamUtils.beam_blockers(all_blockers, world_positions[0], world_positions[1])
-			var flashing = BeamUtils.expand_connected(all_blockers, blocking)
-			for b in all_blockers:
-				b.set_blocking(b in flashing)
-		else:
-			GameManager.beam_blocked = false
-			GameManager.evaluate_puzzle()
-			_play_beam.activate(path)
-			for b in get_tree().get_nodes_in_group("lightning_blockers"):
-				b.set_blocking(false)
-	else:
-		GameManager.beam_blocked = false
-		GameManager.evaluate_puzzle()
-		_play_beam.deactivate()
-		for b in get_tree().get_nodes_in_group("lightning_blockers"):
-			b.set_blocking(false)
+		path = _compute_beam_path(world_positions[0], world_positions[1])
+	BeamUtils.apply_beam_result(_play_beam, get_tree().get_nodes_in_group("lightning_blockers"), world_positions, path)
 
 func _reset_room() -> void:
 	if _play_player == null or not is_instance_valid(_play_player):

@@ -1,9 +1,14 @@
 extends "res://scripts/WaterEnemy.gd"
 
+const WIND_BLOCK_SCENE = preload("res://scenes/objects/WindBlock.tscn")
+
 enum MoveState { IDLE, HOP, JUMP_WINDUP, JUMP }
 
 const BOUNCE_MAX_HP := 50
 const MOVE_SPEED := 0.286
+# Stays stationary until the player comes within this distance, then activates
+# and keeps pathfinding toward the player for the rest of its life.
+const ACTIVATION_RADIUS := 96.0
 const SPRITE_LAG_SPEED := 24.0
 const WAIT_MIN := 0.5
 const WAIT_MAX := 0.8
@@ -46,21 +51,50 @@ var _wait_duration := 0.0
 var _hop_t := 0.0
 var _sprite_scale := Vector2.ONE
 var _idle_time := 0.0
+var _activated := false
+var _transforming := false
 
 @onready var _hitbox_shape: CollisionShape2D = $HitboxArea/HitboxShape
 
 func get_max_hp() -> int:
 	return BOUNCE_MAX_HP
 
+# Immune to fan wind. The electric beam no longer kills it outright — instead it
+# turns into a WindBlock (a fan-pushable block). If the beam catches it mid-jump
+# over a wall it doesn't transform on the wall tile; it finishes the hop and only
+# becomes a block once it has landed on the far side (a tile that can hold a block).
 func _handle_beam() -> void:
-	for fan in get_tree().get_nodes_in_group("fans"):
-		if fan.is_active() and fan.is_position_in_airflow(get_center()):
-			hp -= 1
-			_main._trigger_shake(2.0)
-			if hp <= 0:
-				hp = 0
-				_die()
-			return
+	var beam = _main.electric_beam
+	if beam == null:
+		return
+	if beam.active and beam.is_point_on_beam(get_center(), BEAM_RADIUS):
+		_begin_transform()
+
+func _begin_transform() -> void:
+	if _transforming or _dead:
+		return
+	_transforming = true
+	# Transforms right away if already settled on a free tile; otherwise the hop
+	# finishes first (driven from _process) and it transforms on landing.
+	_try_finish_transform()
+
+# Returns true (and turns into a WindBlock) only when settled on a tile that can
+# actually hold a block; otherwise it keeps the pending transform and waits.
+func _try_finish_transform() -> bool:
+	if _move_state != MoveState.IDLE:
+		return false
+	var cell := _self_cell()
+	if _main.is_blocked(cell):
+		return false
+	_dead = true
+	var wb = WIND_BLOCK_SCENE.instantiate()
+	wb.position = GridUtils.to_world(cell)
+	# Parent under the same node the enemy lives in (the Walls TileMapLayer in Main,
+	# y_sort_root in the editor) so the new block depth-sorts correctly.
+	get_parent().add_child(wb)
+	_main._trigger_shake(4.0)
+	queue_free()
+	return true
 
 func _ready() -> void:
 	super._ready()
@@ -89,9 +123,29 @@ func _process(delta: float) -> void:
 	if _main.electric_beam == null:
 		return
 
+	if _transforming:
+		# Beam already caught it — finish the in-progress hop so it lands on the far
+		# side of any wall, then become a WindBlock. No more pathing/contact.
+		if _move_state == MoveState.JUMP_WINDUP:
+			_process_windup(delta)
+		elif _move_state in [MoveState.HOP, MoveState.JUMP]:
+			_process_hop(delta)
+		if _try_finish_transform():
+			return
+		_sync_sprite(delta)
+		return
+
 	_check_beam_and_contact()
 
 	if _move_state == MoveState.IDLE:
+		if not _activated:
+			# Sit still and idle-bob until the player gets close enough to wake it.
+			if (_main.player.get_body_center() - get_center()).length() <= ACTIVATION_RADIUS:
+				_activated = true
+			else:
+				_idle_bob(delta)
+				_sync_sprite(delta)
+				return
 		_path_timer -= delta
 		if _path_timer <= 0.0:
 			_recalc_path()
@@ -101,9 +155,7 @@ func _process(delta: float) -> void:
 			var wait_t := 1.0 - (_wait_timer / _wait_duration)
 			_apply_scale_target(Vector2.ONE.lerp(LANDING_SQUASH, sin(wait_t * PI)), delta)
 		else:
-			_idle_time += delta
-			var bob := sin(_idle_time * TAU * 1.1) * 0.05
-			_apply_scale_target(Vector2(1.0 + bob, 1.0 - bob), delta)
+			_idle_bob(delta)
 			_begin_next_step()
 	elif _move_state == MoveState.JUMP_WINDUP:
 		_process_windup(delta)
@@ -134,6 +186,11 @@ func _can_hurt_player() -> bool:
 
 func _apply_scale_target(target: Vector2, delta: float) -> void:
 	_sprite_scale = _sprite_scale.lerp(target, minf(1.0, SCALE_LERP * delta))
+
+func _idle_bob(delta: float) -> void:
+	_idle_time += delta
+	var bob := sin(_idle_time * TAU * 1.1) * 0.05
+	_apply_scale_target(Vector2(1.0 + bob, 1.0 - bob), delta)
 
 # Resting sprite offset (scale 1, no hop arc, no lag) — the value _sync_sprite()
 # produces at rest, so the editor-placed sprite lands where it sits on the first
@@ -317,6 +374,8 @@ func push(dir: Vector2i) -> void:
 
 func reset() -> void:
 	super.reset()
+	_activated = false
+	_transforming = false
 	_path.clear()
 	_path_timer = 0.0
 	_move_state = MoveState.IDLE

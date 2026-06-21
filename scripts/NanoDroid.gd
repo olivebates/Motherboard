@@ -19,6 +19,22 @@ const PUSH_HOLD_TIME := 0.15   # must press into a block this long before it mov
 const PUSH_FREEZE := 0.15      # brief cooldown after a push before it can charge again
 const SPRITE_SPEED := 20.0     # how fast the sprite eases back after a shove
 
+# Walk/idle animation sheets (all 32×32 frames). Walk cycles play while moving and
+# freeze on the current frame when stopped; idling while facing down plays the
+# dedicated idle sheet. Explode plays once when the beam destroys the droid.
+const TEX_WALK_DOWN  = preload("res://Sprites/enemies/nanobot_down_walk-Sheet.webp")
+const TEX_WALK_LEFT  = preload("res://Sprites/enemies/nanobot_walk_left-Sheet.webp")
+const TEX_WALK_RIGHT = preload("res://Sprites/enemies/Nanobot-walk-right-Sheet.webp")
+const TEX_WALK_UP    = preload("res://Sprites/enemies/Nanobot_walk_up-Sheet.webp")
+const TEX_IDLE_DOWN  = preload("res://Sprites/enemies/Nanobot_idle-Sheet.webp")
+const TEX_EXPLODE    = preload("res://Sprites/enemies/Explode-Sheet.webp")
+const WALK_FRAMES := 4
+const IDLE_FRAMES := 6
+const WALK_FPS := 10.0
+const IDLE_FPS := 6.0
+const EXPLODE_FRAMES := 9
+const EXPLODE_DURATION := 0.78
+
 var start_grid_pos: Vector2i = Vector2i.ZERO
 var _home_room: Vector2i = Vector2i.ZERO
 var _was_current := false
@@ -45,6 +61,10 @@ var _hitbox_offset := Vector2(16.0, 16.0)
 
 @onready var sprite: Sprite2D = $Sprite2D
 
+# Animation state for the directional walk/idle sprite.
+var _facing := "down"
+var _anim_time := 0.0
+
 var grid_pos: Vector2i:
 	get:
 		return GridUtils.to_grid(position)
@@ -60,6 +80,8 @@ func _ready() -> void:
 	position = Vector2(start_grid_pos.x * TILE_SIZE, start_grid_pos.y * TILE_SIZE)
 	sprite.centered = false
 	sprite.position = Vector2.ZERO
+	sprite.vframes = 1
+	_set_sheet(TEX_IDLE_DOWN, IDLE_FRAMES)
 	_eject_from_solid()
 
 func get_center() -> Vector2:
@@ -152,6 +174,9 @@ func _process(delta: float) -> void:
 	# Keep it inside its room: a 16px inset border it cannot cross.
 	_clamp_to_room()
 
+	# Drive the walk/idle sprite from the actual movement this frame.
+	_update_sprite(delta, velocity, moved_x, moved_y)
+
 	# Ease the sprite back after a shove so the body doesn't snap into place.
 	if _sprite_lag != Vector2.ZERO:
 		_sprite_lag = _sprite_lag.lerp(Vector2.ZERO, minf(1.0, SPRITE_SPEED * delta))
@@ -174,11 +199,10 @@ func _explode() -> void:
 		return
 	_destroyed = true
 	var center := get_center()
-	_spawn_shockwave(center)
-	_spawn_particles(center)
+	_play_explosion(center)
 	sprite.visible = false
 	if _main.has_method("_trigger_shake"):
-		_main._trigger_shake(1.5)
+		_main._trigger_shake(15.0)
 
 	# Destroy any breakable blocks within the blast radius.
 	for wall in get_tree().get_nodes_in_group("breakable_walls"):
@@ -195,55 +219,62 @@ func _explode() -> void:
 			if _main.has_method("_reset_room"):
 				_main._reset_room()
 
-func _circle_points(radius: float, segments: int, closed: bool) -> PackedVector2Array:
-	var pts := PackedVector2Array()
-	var count := segments + 1 if closed else segments
-	for i in range(count):
-		var a := TAU * float(i) / float(segments)
-		pts.append(Vector2(cos(a), sin(a)) * radius)
-	return pts
+func _play_explosion(center: Vector2) -> void:
+	# A short-lived 96×96 explosion sprite played once at the blast center.
+	var ex := Sprite2D.new()
+	ex.texture = TEX_EXPLODE
+	ex.hframes = EXPLODE_FRAMES
+	ex.centered = true
+	ex.position = center
+	ex.z_index = 11
+	ex.z_as_relative = false
+	_main.add_child(ex)
+	var tw := ex.create_tween()
+	tw.tween_property(ex, "frame", EXPLODE_FRAMES - 1, EXPLODE_DURATION).from(0)
+	tw.tween_callback(ex.queue_free)
 
-func _spawn_shockwave(center: Vector2) -> void:
-	# Expanding circular ring sized to the blast radius.
-	var ring := Line2D.new()
-	ring.position = center
-	ring.z_index = 11
-	ring.z_as_relative = false
-	ring.width = 3.0
-	ring.default_color = Color(1.0, 1.0, 1.0, 1.0)
-	ring.joint_mode = Line2D.LINE_JOINT_ROUND
-	ring.points = _circle_points(BREAK_RADIUS, 28, true)
-	ring.scale = Vector2(0.12, 0.12)
-	_main.add_child(ring)
-	var ring_tw := ring.create_tween().set_parallel(true)
-	ring_tw.tween_property(ring, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	ring_tw.tween_property(ring, "modulate:a", 0.0, 0.45).set_ease(Tween.EASE_IN)
-	ring_tw.finished.connect(ring.queue_free)
+# ── Walk/idle animation ──────────────────────────────────────────────────────
 
-	# Quick filled circular flash at the core.
-	var flash := Polygon2D.new()
-	flash.position = center
-	flash.z_index = 11
-	flash.z_as_relative = false
-	flash.color = Color(1.0, 1.0, 1.0, 0.9)
-	flash.polygon = _circle_points(18.0, 24, false)
-	flash.scale = Vector2(0.3, 0.3)
-	_main.add_child(flash)
-	var flash_tw := flash.create_tween().set_parallel(true)
-	flash_tw.tween_property(flash, "scale", Vector2(1.6, 1.6), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	flash_tw.tween_property(flash, "modulate:a", 0.0, 0.25).set_ease(Tween.EASE_IN)
-	flash_tw.finished.connect(flash.queue_free)
+func _set_sheet(tex: Texture2D, frames: int) -> void:
+	if sprite.texture == tex:
+		return
+	sprite.texture = tex
+	sprite.hframes = frames
+	sprite.frame = 0
+	_anim_time = 0.0
 
-func _spawn_particles(center: Vector2) -> void:
-	EffectUtils.spawn_burst(_main, center, {
-		"amount": 28, "lifetime": 0.6,
-		"velocity_min": 60.0, "velocity_max": 160.0,
-		"gravity": Vector2(0, 200), "scale_min": 2.0, "scale_max": 4.0,
-	})
+func _update_sprite(delta: float, velocity: Vector2, moved_x: bool, moved_y: bool) -> void:
+	var moving := moved_x or moved_y
+	if moving:
+		# Face the dominant axis of actual movement.
+		if moved_x and (not moved_y or absf(velocity.x) >= absf(velocity.y)):
+			_facing = "right" if velocity.x > 0.0 else "left"
+		else:
+			_facing = "down" if velocity.y > 0.0 else "up"
+
+	if not moving and _facing == "down":
+		# Idling while facing down plays the dedicated idle cycle.
+		_set_sheet(TEX_IDLE_DOWN, IDLE_FRAMES)
+		_anim_time += delta
+		sprite.frame = int(_anim_time * IDLE_FPS) % IDLE_FRAMES
+		return
+
+	var tex := TEX_WALK_DOWN
+	match _facing:
+		"left":  tex = TEX_WALK_LEFT
+		"right": tex = TEX_WALK_RIGHT
+		"up":    tex = TEX_WALK_UP
+	_set_sheet(tex, WALK_FRAMES)
+	if moving:
+		_anim_time += delta
+		sprite.frame = int(_anim_time * WALK_FPS) % WALK_FRAMES
+	# Not moving (and not facing down): freeze on the current frame.
 
 func reset() -> void:
 	_destroyed = false
 	position = Vector2(start_grid_pos.x * TILE_SIZE, start_grid_pos.y * TILE_SIZE)
+	_facing = "down"
+	_set_sheet(TEX_IDLE_DOWN, IDLE_FRAMES)
 	sprite.visible = true
 	sprite.position = Vector2.ZERO
 	_sprite_lag = Vector2.ZERO

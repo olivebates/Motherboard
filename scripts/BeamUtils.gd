@@ -36,6 +36,40 @@ static func nearest_first_beam(blockers: Array, current: Vector2, target: Vector
 			return result
 	return []
 
+## Applies a freshly computed beam result — the shared body of Main and
+## LevelEditor `_update_beam()`. `world_positions` is the prong world positions (0,
+## 1 or 2 of them); `path` is the routed beam path (or [] when there is no clear
+## route between two prongs). Toggles the beam node, flashes blockers, and updates
+## GameManager puzzle state (beam_blocked / conductor points / evaluate_puzzle).
+## Callers keep their own (divergent) path computation; only this tail is shared.
+static func apply_beam_result(beam: Node, blockers: Array, world_positions: Array, path: Array) -> void:
+	if world_positions.size() == 2:
+		if path.is_empty():
+			# No clear route — flash the blockers on the direct line so the player
+			# sees what is in the way.
+			GameManager.beam_blocked = true
+			GameManager.beam_conductor_points.clear()
+			GameManager.evaluate_puzzle()
+			beam.deactivate()
+			var blocking := beam_blockers(blockers, world_positions[0], world_positions[1])
+			var flashing := expand_connected(blockers, blocking)
+			for b in blockers:
+				b.set_blocking(b in flashing)
+		else:
+			GameManager.beam_blocked = false
+			GameManager.set_beam_conductors_from_path(path)
+			GameManager.evaluate_puzzle()
+			beam.activate(path)
+			for b in blockers:
+				b.set_blocking(false)
+	else:
+		GameManager.beam_blocked = false
+		GameManager.beam_conductor_points.clear()
+		GameManager.evaluate_puzzle()
+		beam.deactivate()
+		for b in blockers:
+			b.set_blocking(false)
+
 ## Blockers whose tile the segment pos_a→pos_b passes through.
 static func beam_blockers(blockers: Array, pos_a: Vector2, pos_b: Vector2) -> Array:
 	var blocking: Array = []

@@ -34,7 +34,6 @@ var _hold_particles := false
 func _ready() -> void:
 	add_to_group("fans")
 	add_to_group("push_blocks")
-	add_to_group("nuts")
 	start_grid_pos = GridUtils.to_grid(position)
 	grid_pos = start_grid_pos
 	position = Vector2(grid_pos.x * TILE_SIZE, grid_pos.y * TILE_SIZE)
@@ -99,9 +98,6 @@ func prepare_reset() -> void:
 	_hold_particles = true
 	_blocks_in_airflow.clear()
 	_clear_particles()
-
-func get_beam_point() -> Vector2:
-	return GridUtils.tile_center(global_position + sprite.position)
 
 func is_active() -> bool:
 	return _on

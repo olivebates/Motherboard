@@ -27,6 +27,10 @@ var doors: Dictionary = {}
 var wind_powered_ids: Array = []
 var floor_switch_ids: Array = []
 var capacitor_ids: Array = []
+# World-space beam points of conductors (nuts/screws) the active beam currently
+# chains through. A conductor sitting on a floor panel activates that panel, same
+# as a prong. Refreshed by Main/LevelEditor._update_beam each time the beam changes.
+var beam_conductor_points: Array = []
 
 func register_floor_panel(grid_pos: Vector2i, id: String, id2: String = "") -> void:
 	var ids: Array = [id]
@@ -84,6 +88,12 @@ func set_wind_power(turbine_id: String, powered: bool) -> void:
 		wind_powered_ids.erase(turbine_id)
 	evaluate_puzzle()
 
+func set_beam_conductors_from_path(path: Array) -> void:
+	beam_conductor_points.clear()
+	for entry in path:
+		if entry is Node2D and entry.has_method("get_beam_point"):
+			beam_conductor_points.append(entry.get_beam_point())
+
 func clear_scene_state() -> void:
 	prongs.clear()
 	doors.clear()
@@ -91,6 +101,7 @@ func clear_scene_state() -> void:
 	wind_powered_ids.clear()
 	floor_switch_ids.clear()
 	capacitor_ids.clear()
+	beam_conductor_points.clear()
 	beam_blocked = false
 
 const PANEL_ACTIVATION_RADIUS := 24.0
@@ -107,17 +118,24 @@ func evaluate_puzzle() -> void:
 
 	if not beam_blocked and prongs.size() == MAX_PRONGS \
 			and is_instance_valid(prongs[0]["node"]) and is_instance_valid(prongs[1]["node"]):
-		var world_a: Vector2 = prongs[0]["node"].position
-		var world_b: Vector2 = prongs[1]["node"].position
-		var panel_a := _panel_near(world_a)
-		var panel_b := _panel_near(world_b)
-		var ids_a: Array = floor_panels.get(panel_a, [])
-		var ids_b: Array = floor_panels.get(panel_b, [])
-
-		if not ids_a.is_empty() and not ids_b.is_empty() and panel_a != panel_b:
-			for id in ids_a:
-				if id in ids_b and id not in ids_to_open:
-					ids_to_open.append(id)
+		# Each prong AND each conductor (nut/screw) the beam chains through that sits
+		# on a floor panel activates that panel. A door id opens when two or more
+		# distinct activated panels share it (the classic case: a prong on each of two
+		# panels sharing an id; now a chained nut on a panel counts the same).
+		var points: Array = [prongs[0]["node"].circuit_pos, prongs[1]["node"].circuit_pos]
+		points.append_array(beam_conductor_points)
+		var active_panels: Array = []
+		for pt in points:
+			var panel := _panel_near(pt)
+			if floor_panels.has(panel) and panel not in active_panels:
+				active_panels.append(panel)
+		var id_panel_count: Dictionary = {}
+		for panel in active_panels:
+			for id in floor_panels[panel]:
+				id_panel_count[id] = id_panel_count.get(id, 0) + 1
+		for id in id_panel_count:
+			if id_panel_count[id] >= 2 and id not in ids_to_open:
+				ids_to_open.append(id)
 
 	for id in wind_powered_ids:
 		if id not in ids_to_open:
@@ -138,8 +156,15 @@ func get_prong_world_positions() -> Array:
 	var positions: Array = []
 	for p in prongs:
 		if is_instance_valid(p["node"]):
-			positions.append(p["node"].position)
+			positions.append(p["node"].circuit_pos)
 	return positions
+
+# Prong positions plus any conductor (nut/screw) the beam chains through — every
+# point that can activate a floor panel. Used by FloorPanel for its active state.
+func get_activation_points() -> Array:
+	var points := get_prong_world_positions()
+	points.append_array(beam_conductor_points)
+	return points
 
 func get_prong_positions() -> Array:
 	var positions: Array = []

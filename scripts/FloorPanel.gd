@@ -26,8 +26,8 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	var my_center := position + Vector2(16.0, 16.0)
 	var now_active := false
-	for prong_pos in GameManager.get_prong_world_positions():
-		if prong_pos.distance_to(my_center) <= GameManager.PANEL_ACTIVATION_RADIUS:
+	for act_pos in GameManager.get_activation_points():
+		if act_pos.distance_to(my_center) <= GameManager.PANEL_ACTIVATION_RADIUS:
 			now_active = true
 			break
 	if now_active != _active:

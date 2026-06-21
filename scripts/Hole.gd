@@ -18,6 +18,7 @@ const SINK_TIME = 0.4
 const TEX_EMPTY = preload("res://Sprites/objects/Holes/hole1.png")
 const TEX_FILLED = preload("res://Sprites/objects/Holes/hole_filled.png")
 const TEX_NUT = preload("res://Sprites/objects/Holes/hole_nut.png")
+const TEX_WINDBLOCK = preload("res://Sprites/objects/Holes/hole_dust_ful2l.webp")
 
 enum State { EMPTY, FILLING, FILLED, NANO }
 
@@ -119,6 +120,8 @@ func _finalize_fill(block: Node) -> void:
 			sprite.texture = TEX_NUT
 		"block":
 			sprite.texture = TEX_FILLED
+		"windblock":
+			sprite.texture = TEX_WINDBLOCK
 		_:
 			sprite.texture = TEX_EMPTY
 			var bs = block.get_node_or_null("Sprite2D")
@@ -153,6 +156,8 @@ func _block_kind(block: Node) -> String:
 	var path: String = scr.resource_path if scr != null else ""
 	if path.ends_with("Nut.gd"):
 		return "nut"
+	if path.ends_with("WindBlock.gd"):
+		return "windblock"
 	if path.ends_with("PushBlock.gd"):
 		return "block"
 	return "other"

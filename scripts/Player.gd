@@ -41,6 +41,17 @@ var _main: Node2D
 var _facing := "front"
 var _facing_right := true
 
+# Height (px) of the current sprite frame, used to anchor the sprite by its feet.
+# Normal frames are 32×32; the prong-plant frames are 32×64 (the raised hammer
+# bleeds upward) so they need a taller anchor while planting.
+var _sprite_h := 32.0
+# Extra vertical offset applied to the sprite (downward positive); used to nudge the
+# prong-plant animation down a few pixels while it plays.
+var _sprite_y_offset := 0.0
+const PLANT_FRAME_H := 64.0
+const PLANT_FPS := 12.0
+const PLANT_Y_OFFSET := 6.0
+
 # Root position is hitbox bottom (Y-sort). Body holds sprite + hitbox at tile-center layout.
 var _half_w := 5.0
 var _half_h := 5.0
@@ -87,8 +98,14 @@ func _setup_animations() -> void:
 	_add_strip(frames, "push_side", "res://Sprites/player/Push_side-Sheet.webp", 32, 32, 2)
 	_add_strip(frames, "push_up",   "res://Sprites/player/Push_up-Sheet.webp",   32, 36, 2)
 	_add_strip(frames, "push_down", "res://Sprites/player/Push_down-Sheet.webp", 32, 32, 2)
+	# Prong-plant: 4 frames of 32×64 (a hammer-swing); played once when planting a
+	# prong. The extra 32px of height bleeds upward (anchored by the feet via _sprite_h).
+	_add_strip(frames, "plant", "res://Sprites/player/Hammer_Stake1-Sheet.webp", 32, 64, 4)
+	frames.set_animation_speed("plant", PLANT_FPS)
 	# Death animation: 16 frames in a 4×4 grid, played once on room reset.
 	_add_sheet(frames, "death", "res://Sprites/player/Death-Sheet.webp", 4, 4, 16, 11.2, false)
+	# Happy jump: 4 frames in a 2×2 grid, played once on a victory beat (boss off-screen, orb collected).
+	_add_sheet(frames, "happy_jump", "res://Sprites/player/Spark_Happy_Jump.webp", 2, 2, 4, 10.0, false)
 	_sprite.sprite_frames = frames
 	_sprite.play("front_idle")
 
@@ -171,7 +188,7 @@ func _process(delta: float) -> void:
 	visual_pos = visual_pos.lerp(body_center, minf(1.0, SPRITE_SPEED * delta))
 	var lag := visual_pos - body_center
 	# Anchor squash/stretch at bottom-center of the 32×32 sprite
-	_sprite.position = lag + Vector2(-16.0 * _sprite.scale.x, 16.0 - 32.0 * _sprite.scale.y)
+	_sprite.position = lag + Vector2(-16.0 * _sprite.scale.x, 16.0 - _sprite_h * _sprite.scale.y + _sprite_y_offset)
 
 	if movement_locked:
 		_push_pose_dir = Vector2i.ZERO
@@ -279,9 +296,9 @@ func _try_prong_teleport() -> bool:
 		return false
 	var my_center = get_body_center()
 	for i in range(2):
-		var prong_center = prongs[i].global_position + prongs[i]._body_offset + prongs[i]._hitbox_offset
+		var prong_center = prongs[i].hitbox_center()
 		if my_center.distance_to(prong_center) < 24.0:
-			var other_center = prongs[1 - i].global_position + prongs[1 - i]._body_offset + prongs[1 - i]._hitbox_offset
+			var other_center = prongs[1 - i].hitbox_center()
 			_main.teleport_between_prongs(other_center)
 			return true
 	return false
@@ -470,6 +487,29 @@ func play_teleport(reverse: bool = false) -> void:
 	_sprite.speed_scale = 1.0
 	_sprite.play(_facing + "_idle")
 
+# Freezes the player and plays the hammer-swing "plant" animation once. Awaited by
+# Main.spawn_prong() so the prong is only placed after the swing finishes.
+func play_plant() -> void:
+	movement_locked = true
+	_push_pose_dir = Vector2i.ZERO
+	_push_kick_time = 0.0
+	_push_blocked = false
+	_push_strain_time = 0.0
+	_sprite.scale = Vector2.ONE
+	_sprite.flip_h = false
+	_sprite.speed_scale = 1.0
+	_sprite.visible = true
+	_sprite_h = PLANT_FRAME_H
+	_sprite_y_offset = PLANT_Y_OFFSET
+	_sprite.play("plant")
+	await _sprite.animation_finished
+	_sprite_h = 32.0
+	_sprite_y_offset = 0.0
+	_facing = "front"
+	_sprite.speed_scale = 1.0
+	_sprite.play("front_idle")
+	movement_locked = false
+
 func lock_movement() -> void:
 	movement_locked = true
 
@@ -551,6 +591,26 @@ func push_out(displacement: Vector2) -> void:
 func look_up() -> void:
 	_facing = "back"
 	_sprite.play("back_idle")
+
+# Freezes the player and plays the one-shot "happy jump" celebration, then settles
+# back into the front idle and unlocks. Used after a boss flies off screen and after
+# the power-orb pickup animation.
+func play_happy_jump() -> void:
+	movement_locked = true
+	_push_pose_dir = Vector2i.ZERO
+	_push_kick_time = 0.0
+	_push_blocked = false
+	_push_strain_time = 0.0
+	_sprite.scale = Vector2.ONE
+	_sprite.flip_h = false
+	_sprite.speed_scale = 1.0
+	_sprite.visible = true
+	_sprite.play("happy_jump")
+	await _sprite.animation_finished
+	_facing = "front"
+	_sprite.speed_scale = 1.0
+	_sprite.play("front_idle")
+	movement_locked = false
 
 func eject_from_solid() -> void:
 	if not _is_inside_solid():

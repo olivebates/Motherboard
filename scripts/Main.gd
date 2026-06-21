@@ -8,7 +8,11 @@ const ROOM_PIXEL_WIDTH := ROOM_WIDTH * TILE_SIZE
 const ROOM_PIXEL_HEIGHT := ROOM_HEIGHT * TILE_SIZE
 const CAMERA_TWEEN_DURATION := 0.25
 const CAMERA_MARGIN := Vector2(16.0, 16.0)
-const PUSH_ROOM_MARGIN := 16.0   # pushable objects stay this many px inside the room edge
+# Pushable-object room bounds, asymmetric per edge. Positive = inset (block must stay
+# that many px inside the border); negative = outset (block may extend that many px
+# past the border). Left/top use NEAR, right/bottom use FAR.
+const PUSH_ROOM_MARGIN_NEAR := 1.0    # left/top: 1px in from the border (edge tile off-limits)
+const PUSH_ROOM_MARGIN_FAR := -1.0    # right/bottom: 1px past the border (edge tile reachable)
 
 @onready var wall_tilemap: TileMapLayer = $Walls
 @export var pass_tilemap: TileMapLayer
@@ -879,17 +883,20 @@ func get_player_blocking_rects(area: Rect2, include_holes: bool = true) -> Array
 	return rects
 
 func _within_room_push_bounds(grid_pos: Vector2i) -> bool:
-	# The block's 32×32 tile must sit fully inside its room, inset PUSH_ROOM_MARGIN px
-	# from each edge — this keeps pushables from being shoved out through doorways.
+	# The block's 32×32 tile must sit inside its room's push bounds — inset
+	# PUSH_ROOM_MARGIN_NEAR px on the left/top and PUSH_ROOM_MARGIN_FAR px on the
+	# right/bottom — which keeps pushables from being shoved out through doorways.
 	var room_x := floori(float(grid_pos.x) / ROOM_WIDTH)
 	var room_y := floori(float(grid_pos.y) / ROOM_HEIGHT)
-	var room_rect := Rect2(
-		WORLD_OFFSET + room_x * ROOM_PIXEL_WIDTH,
-		WORLD_OFFSET + room_y * ROOM_PIXEL_HEIGHT,
-		ROOM_PIXEL_WIDTH, ROOM_PIXEL_HEIGHT
-	)
+	var rx := WORLD_OFFSET + room_x * ROOM_PIXEL_WIDTH
+	var ry := WORLD_OFFSET + room_y * ROOM_PIXEL_HEIGHT
+	var left := rx + PUSH_ROOM_MARGIN_NEAR
+	var top := ry + PUSH_ROOM_MARGIN_NEAR
+	var right := rx + ROOM_PIXEL_WIDTH - PUSH_ROOM_MARGIN_FAR
+	var bottom := ry + ROOM_PIXEL_HEIGHT - PUSH_ROOM_MARGIN_FAR
 	var block_rect := Rect2(grid_pos.x * TILE_SIZE, grid_pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-	return room_rect.grow(-PUSH_ROOM_MARGIN).encloses(block_rect)
+	return block_rect.position.x >= left and block_rect.position.y >= top \
+			and block_rect.end.x <= right and block_rect.end.y <= bottom
 
 func can_push_block_to(grid_pos: Vector2i) -> bool:
 	if not _within_room_push_bounds(grid_pos):
@@ -1093,12 +1100,7 @@ func _complete_teleport(room: Vector2i) -> void:
 	player.unlock_movement()
 
 func teleport_between_prongs(target_center: Vector2) -> void:
-	player.lock_movement()
-	await player.play_teleport()
-	AudioManager.play_sfx("electric_spawn", 0.0)
-	player.move_to_center(target_center)
-	await player.play_teleport(true)
-	player.unlock_movement()
+	await PlayerUtils.teleport_between_prongs(player, target_center)
 
 func _find_nearest_open_tile(start: Vector2i) -> Vector2i:
 	var visited := { start: true }
@@ -1122,6 +1124,8 @@ func _room_center(room: Vector2i) -> Vector2:
 
 func spawn_prong(pixel_pos: Vector2) -> void:
 	AudioManager.play_sfx("plant_stake")
+	# Swing the hammer first; the prong is only placed once the animation ends.
+	await player.play_plant()
 	if GameManager.prongs.size() >= 2:
 		var oldest = GameManager.prongs[0]
 		GameManager.remove_prong(oldest["node"])
@@ -1139,30 +1143,10 @@ func spawn_prong(pixel_pos: Vector2) -> void:
 func _update_beam() -> void:
 	var world_positions := GameManager.get_prong_world_positions()
 	GameManager.last_activator_pos = player.get_body_center()
+	var path: Array = []
 	if world_positions.size() == 2:
-		var path := _compute_beam_path(world_positions[0], world_positions[1])
-		if path.is_empty():
-			# No valid path — flash blockers on the direct line so the player sees what's in the way
-			GameManager.beam_blocked = true
-			GameManager.evaluate_puzzle()
-			electric_beam.deactivate()
-			var all_blockers := get_tree().get_nodes_in_group("lightning_blockers")
-			var blocking := BeamUtils.beam_blockers(all_blockers, world_positions[0], world_positions[1])
-			var flashing := BeamUtils.expand_connected(all_blockers, blocking)
-			for b in all_blockers:
-				b.set_blocking(b in flashing)
-		else:
-			GameManager.beam_blocked = false
-			GameManager.evaluate_puzzle()
-			electric_beam.activate(path)
-			for b in get_tree().get_nodes_in_group("lightning_blockers"):
-				b.set_blocking(false)
-	else:
-		GameManager.beam_blocked = false
-		GameManager.evaluate_puzzle()
-		electric_beam.deactivate()
-		for b in get_tree().get_nodes_in_group("lightning_blockers"):
-			b.set_blocking(false)
+		path = _compute_beam_path(world_positions[0], world_positions[1])
+	BeamUtils.apply_beam_result(electric_beam, get_tree().get_nodes_in_group("lightning_blockers"), world_positions, path)
 
 func _compute_beam_path(pos_a: Vector2, pos_b: Vector2) -> Array:
 	var rx0 := current_room.x * ROOM_WIDTH

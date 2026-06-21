@@ -1,4 +1,4 @@
-[gd_scene load_steps=46 format=4 uid="uid://cgvx1hckno78k"]
+[gd_scene load_steps=45 format=4 uid="uid://cgvx1hckno78k"]
 
 [ext_resource type="Script" uid="uid://bykaqtvdjj7aw" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="Texture2D" uid="uid://rxef42vfuoej" path="res://Sprites/ui/Circuit_Sprite_Sheet.webp" id="2_fs0b5"]
@@ -39,7 +39,6 @@
 [ext_resource type="Texture2D" uid="uid://bl8kqt6tmvjcl" path="res://Sprites/objects/undo button.png" id="38_cobve"]
 [ext_resource type="PackedScene" path="res://scenes/objects/WindBlock.tscn" id="39_8cp6k"]
 [ext_resource type="PackedScene" uid="uid://dryaba46jh1o0" path="res://scenes/enemies/SpiderEnemy.tscn" id="39_cmqll"]
-[ext_resource type="PackedScene" path="res://scenes/objects/NanoDroid.tscn" id="41_8b871"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_ma7h6"]
 texture = ExtResource("2_fs0b5")
@@ -1665,9 +1664,6 @@ position = Vector2(192, 576)
 [node name="PushBlock35" parent="." instance=ExtResource("6_block")]
 position = Vector2(192, 544)
 
-[node name="PushBlock51" parent="." instance=ExtResource("6_block")]
-position = Vector2(-96, 288)
-
 [node name="PushBlock36" parent="." instance=ExtResource("6_block")]
 position = Vector2(96, 544)
 
@@ -2563,5 +2559,5 @@ id = "FanR1"
 position = Vector2(3264, 1024)
 id = "ezFan3"
 
-[node name="NanoDroid" parent="." instance=ExtResource("41_8b871")]
-position = Vector2(-192, 320)
+[node name="Nut14" parent="." instance=ExtResource("9_bjd11")]
+position = Vector2(288, 224)

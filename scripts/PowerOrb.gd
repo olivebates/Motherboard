@@ -95,9 +95,10 @@ func _update_animation(delta: float) -> void:
 
 		if _anim_time >= TOTAL_DURATION:
 			_animating = false
-			_anim_player.unlock_movement()
 			PowerOrbCounter.add_orb()
 			AudioManager.fade_in_music(0.4)
+			# Freeze + happy jump, then it unlocks the player itself.
+			_anim_player.play_happy_jump()
 			queue_redraw()
 			return
 

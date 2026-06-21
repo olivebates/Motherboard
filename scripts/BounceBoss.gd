@@ -87,13 +87,13 @@ var _panel_rng := RandomNumberGenerator.new()
 # Counts placements (initial spawn = 1, then one per hp threshold).
 var _panel_place_count := 0
 
-var _death_tween: Tween
-var _arc_started := false
-
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
 func get_max_hp() -> int:
 	return BOSS_MAX_HP
+
+func _boss_scale() -> float:
+	return BOSS_SCALE
 
 func _ready() -> void:
 	super._ready()
@@ -197,18 +197,7 @@ func _process(delta: float) -> void:
 	if not in_room:
 		return
 	if _state == State.DYING:
-		if _dead and _arc_started:
-			_visual_pos = position
-			var sx := maxf(scale.x, 0.001)
-			var sy := maxf(scale.y, 0.001)
-			_sprite.position = Vector2(16.0 * BOSS_SCALE / sx - 16.0, 16.0 * BOSS_SCALE / sy - 16.0)
-			var room := _get_home_room()
-			var rx0 := room.x * 25 * TILE_SIZE
-			var ry0 := room.y * 12 * TILE_SIZE
-			var rx1 := rx0 + 25 * TILE_SIZE
-			var ry1 := ry0 + 12 * TILE_SIZE
-			if position.x < rx0 or position.x > rx1 or position.y < ry0 or position.y > ry1:
-				_on_death_complete()
+		_process_death_arc()
 		return
 
 	_handle_beam()
@@ -495,29 +484,6 @@ func _do_death_shakes() -> void:
 		if not is_instance_valid(self):
 			return
 		_main._trigger_shake(30.0)
-
-func _launch_death_arc() -> void:
-	_arc_started = true
-	z_index = 100
-	var start := position
-	var dir := 1.0 if randf() > 0.5 else -1.0
-	_death_tween = create_tween()
-	_death_tween.tween_method(func(p: float) -> void:
-		position.x = start.x + dir * 180.0 * p
-		position.y = start.y - 480.0 * p + 780.0 * p * p
-		rotation = dir * p * 0.8
-	, 0.0, 2.5, 3.5)
-
-func _on_death_complete() -> void:
-	if not _arc_started:
-		return
-	_arc_started = false
-	if _death_tween:
-		_death_tween.kill()
-	_sprite.visible = false
-	_particles.restart()
-	scale = Vector2(BOSS_SCALE, BOSS_SCALE)
-	# Boss doors open themselves once their room has no living boss (see BossDoor).
 
 # ── Reset ─────────────────────────────────────────────────────────────────────
 
