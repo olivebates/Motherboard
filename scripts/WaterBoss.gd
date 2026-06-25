@@ -4,7 +4,9 @@ enum State { CHASE, WINDUP, CHARGE, SPAWN_TELEGRAPH, DYING }
 
 const BOSS_MAX_HP := 1000
 const BASE_SPEED = 40.0
-const MAX_SPEED = 100.0
+const MAX_SPEED = 70.0
+const MINION_CAP = 2
+const MINION_CAP_LOW_HP = 4
 const BOSS_SCALE = 2.0
 
 const SPAWN_INTERVAL = 4.0
@@ -301,10 +303,31 @@ func _teleport_from_beam() -> void:
 
 # ── Minions ───────────────────────────────────────────────────────────────────
 
+func _count_minions() -> int:
+	var home = _get_home_room()
+	var rx0 = home.x * 25
+	var ry0 = home.y * 12
+	var count = 0
+	for e in get_tree().get_nodes_in_group("water_enemies"):
+		if not is_instance_valid(e) or e == self:
+			continue
+		var egp = Vector2i(floori(e._start_pos.x / TILE_SIZE), floori(e._start_pos.y / TILE_SIZE))
+		if egp.x >= rx0 and egp.x < rx0 + 25 and egp.y >= ry0 and egp.y < ry0 + 12:
+			count += 1
+	return count
+
 func _spawn_minions() -> void:
+	var cap = MINION_CAP_LOW_HP if hp < BOSS_MAX_HP * 0.2 else MINION_CAP
+	var slots = cap - _count_minions()
+	if slots <= 0:
+		return
 	var c = get_center()
-	_spawn_water_enemy(c + Vector2(-TILE_SIZE * 3, 0.0))
-	_spawn_water_enemy(c + Vector2(TILE_SIZE * 3, 0.0))
+	var offsets = [Vector2(-TILE_SIZE * 3, 0.0), Vector2(TILE_SIZE * 3, 0.0)]
+	for off in offsets:
+		if slots <= 0:
+			break
+		_spawn_water_enemy(c + off)
+		slots -= 1
 
 func _spawn_water_enemy(spawn_pos: Vector2) -> void:
 	var tile_pos = Vector2(floori(spawn_pos.x / TILE_SIZE) * TILE_SIZE,

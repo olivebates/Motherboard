@@ -1533,10 +1533,12 @@ func _update_beam() -> void:
 	if _play_beam == null or not is_instance_valid(_play_beam):
 		return
 	var world_positions = GameManager.get_prong_world_positions()
+	var blockers := get_tree().get_nodes_in_group("lightning_blockers")
+	var nuts := _gather_chain_nuts()
 	var path: Array = []
 	if world_positions.size() == 2:
-		path = _compute_beam_path(world_positions[0], world_positions[1])
-	BeamUtils.apply_beam_result(_play_beam, get_tree().get_nodes_in_group("lightning_blockers"), world_positions, path)
+		path = BeamUtils.best_beam_path(blockers, world_positions[0], world_positions[1], nuts)
+	BeamUtils.apply_beam_result(_play_beam, blockers, world_positions, path, nuts)
 
 func _reset_room() -> void:
 	if _play_player == null or not is_instance_valid(_play_player):
@@ -1552,12 +1554,12 @@ func _reset_room() -> void:
 	_play_player.reset_to(_play_spawn_pos)
 	_play_player.unlock_movement()
 
-func _compute_beam_path(pos_a: Vector2, pos_b: Vector2) -> Array:
+func _gather_chain_nuts() -> Array:
 	var nut_nodes: Array = []
 	if GameManager.has_ability("chain"):
 		for nut in get_tree().get_nodes_in_group("nuts"):
 			nut_nodes.append(nut)
-	return BeamUtils.nearest_first_beam(get_tree().get_nodes_in_group("lightning_blockers"), pos_a, pos_b, nut_nodes, [pos_a])
+	return nut_nodes
 
 # ──────────────────────────────────────────────
 #  Wire mode helpers

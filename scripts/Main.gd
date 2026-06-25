@@ -37,6 +37,11 @@ var _color_tween: Tween = null
 var _tab_canvas: CanvasLayer
 var _tab_label: Label
 
+# Full-screen post-process that recolors black pixels to modulate * BLACK_TINT_DARKEN.
+const BlackTintShader = preload("res://shaders/black_to_tint.gdshader")
+const BLACK_TINT_DARKEN := 0.07  # modulate * 0.1, then 30% darker
+var _black_tint_mat: ShaderMaterial
+
 const ProngScene = preload("res://scenes/player/Prong.tscn")
 const DoorBallScene = preload("res://scripts/DoorBall.gd")
 
@@ -85,6 +90,7 @@ func _ready() -> void:
 	map_overlay.visit(current_room)
 	camera.position = _room_center(current_room)
 	GameManager.shake_requested.connect(_trigger_shake)
+	_setup_black_tint()
 	_tab_canvas = CanvasLayer.new()
 	_tab_canvas.layer = 5
 	add_child(_tab_canvas)
@@ -599,6 +605,31 @@ func _process(delta: float) -> void:
 	if modulate != _last_btn_color:
 		_last_btn_color = modulate
 		_refresh_settings_colors(modulate)
+		_update_black_tint_color()
+
+func _setup_black_tint() -> void:
+	_black_tint_mat = ShaderMaterial.new()
+	_black_tint_mat.shader = BlackTintShader
+	_update_black_tint_color()
+	# Sits above every other CanvasLayer (settings = 60, save status = 50, tab = 5)
+	# so its screen texture captures the whole frame, menus included.
+	var canvas := CanvasLayer.new()
+	canvas.layer = 100
+	add_child(canvas)
+	var rect := ColorRect.new()
+	rect.material = _black_tint_mat
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	canvas.add_child(rect)
+
+func _update_black_tint_color() -> void:
+	if _black_tint_mat == null:
+		return
+	_black_tint_mat.set_shader_parameter("tint", Color(
+		modulate.r * BLACK_TINT_DARKEN,
+		modulate.g * BLACK_TINT_DARKEN,
+		modulate.b * BLACK_TINT_DARKEN,
+		1.0))
 
 func _update_tab_label() -> void:
 	if _tab_label == null:
@@ -1143,12 +1174,16 @@ func spawn_prong(pixel_pos: Vector2) -> void:
 func _update_beam() -> void:
 	var world_positions := GameManager.get_prong_world_positions()
 	GameManager.last_activator_pos = player.get_body_center()
+	var blockers := get_tree().get_nodes_in_group("lightning_blockers")
+	var nuts := _gather_chain_nuts()
 	var path: Array = []
 	if world_positions.size() == 2:
-		path = _compute_beam_path(world_positions[0], world_positions[1])
-	BeamUtils.apply_beam_result(electric_beam, get_tree().get_nodes_in_group("lightning_blockers"), world_positions, path)
+		# Path stores Vector2 for prong endpoints and Node2D for nuts so ElectricBeam
+		# can resolve nut positions each frame and follow the sliding sprite.
+		path = BeamUtils.best_beam_path(blockers, world_positions[0], world_positions[1], nuts)
+	BeamUtils.apply_beam_result(electric_beam, blockers, world_positions, path, nuts)
 
-func _compute_beam_path(pos_a: Vector2, pos_b: Vector2) -> Array:
+func _gather_chain_nuts() -> Array:
 	var rx0 := current_room.x * ROOM_WIDTH
 	var ry0 := current_room.y * ROOM_HEIGHT
 	var nut_nodes: Array = []
@@ -1157,10 +1192,7 @@ func _compute_beam_path(pos_a: Vector2, pos_b: Vector2) -> Array:
 			var gp: Vector2i = nut.grid_pos
 			if gp.x >= rx0 and gp.x < rx0 + ROOM_WIDTH and gp.y >= ry0 and gp.y < ry0 + ROOM_HEIGHT:
 				nut_nodes.append(nut)
-
-	# Path stores Vector2 for prong endpoints and Node2D for nuts so ElectricBeam
-	# can resolve nut positions each frame and follow the sliding sprite.
-	return BeamUtils.nearest_first_beam(get_tree().get_nodes_in_group("lightning_blockers"), pos_a, pos_b, nut_nodes, [pos_a])
+	return nut_nodes
 
 func _world_to_grid(world_pos: Vector2) -> Vector2i:
 	return Vector2i(

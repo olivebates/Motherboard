@@ -12,17 +12,80 @@ const GROUND_OFFSET := 24.0
 func _ground_offset() -> float:
 	return GROUND_OFFSET
 
+# Only chase once the player comes within this range; idle otherwise.
+const CHASE_RADIUS := 128.0
+
+func _chase_radius() -> float:
+	return CHASE_RADIUS
+
 const _ROOM_PX_W = 25 * 32
 const _ROOM_PX_H = 12 * 32
 
 var hp := MAX_HP
+
+# Directional walk/idle animation. Null on the boss (its scene has no
+# AnimatedSprite2D child), so every use is guarded.
+@onready var _anim: AnimatedSprite2D = get_node_or_null("Sprite2D/AnimatedSprite2D")
+var _facing := "front"
 
 func _ready() -> void:
 	super._ready()
 	add_to_group("water_enemies")
 	if boss_spawned:
 		add_to_group("boss_spawned_enemies")
+	_setup_animations()
 	call_deferred("_register_health_bar")
+
+# ── Directional animations ─────────────────────────────────────────────────────
+# Four facings × {idle, run}. Idle sheets are 4 frames (128×32), run sheets are
+# 6 frames (192×32); all frames 32×32 in a single horizontal strip. Left/right
+# have their own sheets, so no flip_h is needed.
+const _IDLE_FRAMES = 4
+const _RUN_FRAMES = 6
+const _IDLE_FPS = 8.0 / 3.0
+const _RUN_FPS = 12.0 / 3.0
+
+func _setup_animations() -> void:
+	if _anim == null:
+		return
+	var frames = SpriteFrames.new()
+	frames.remove_animation("default")
+	_add_strip(frames, "front_idle", "res://Sprites/enemies/WaterGuy/Front_Idle-Sheet.webp", _IDLE_FRAMES, _IDLE_FPS)
+	_add_strip(frames, "back_idle",  "res://Sprites/enemies/WaterGuy/Back_Idle-Sheet.webp",  _IDLE_FRAMES, _IDLE_FPS)
+	_add_strip(frames, "left_idle",  "res://Sprites/enemies/WaterGuy/Left_Idle-Sheet.webp",  _IDLE_FRAMES, _IDLE_FPS)
+	_add_strip(frames, "right_idle", "res://Sprites/enemies/WaterGuy/Right_Idle-Sheet.webp", _IDLE_FRAMES, _IDLE_FPS)
+	_add_strip(frames, "front_run",  "res://Sprites/enemies/WaterGuy/Water_Front_Run-Sheet.webp",      _RUN_FRAMES, _RUN_FPS)
+	_add_strip(frames, "back_run",   "res://Sprites/enemies/WaterGuy/Water_Back_Run-Sheet.webp",       _RUN_FRAMES, _RUN_FPS)
+	_add_strip(frames, "left_run",   "res://Sprites/enemies/WaterGuy/Water_Side_Run_Left-Sheet.webp",  _RUN_FRAMES, _RUN_FPS)
+	_add_strip(frames, "right_run",  "res://Sprites/enemies/WaterGuy/Water_Side_Run_Right-Sheet.webp", _RUN_FRAMES, _RUN_FPS)
+	_anim.sprite_frames = frames
+	_anim.play("front_idle")
+
+func _add_strip(frames: SpriteFrames, anim: String, path: String, count: int, fps: float) -> void:
+	var tex: Texture2D = load(path)
+	frames.add_animation(anim)
+	frames.set_animation_speed(anim, fps)
+	frames.set_animation_loop(anim, true)
+	for i in range(count):
+		var atlas = AtlasTexture.new()
+		atlas.atlas = tex
+		atlas.region = Rect2(i * 32, 0, 32, 32)
+		frames.add_frame(anim, atlas)
+
+# Faces the player and switches between idle/run based on whether the enemy
+# actually moved this frame.
+func _update_animation(moved: Vector2) -> void:
+	if _anim == null:
+		return
+	var to_player = _main.player.get_body_center() - get_center()
+	if absf(to_player.x) > absf(to_player.y):
+		_facing = "right" if to_player.x > 0.0 else "left"
+	else:
+		_facing = "front" if to_player.y > 0.0 else "back"
+	var is_moving = moved.length() > 0.5
+	var anim = _facing + ("_run" if is_moving else "_idle")
+	if _anim.animation != anim:
+		_anim.play(anim)
 
 func get_max_hp() -> int:
 	return MAX_HP
@@ -81,11 +144,17 @@ func _process(delta: float) -> void:
 		return
 	if _main.electric_beam == null:
 		return
+	var prev = position
 	super._process(delta)
+	if not _dead:
+		_update_animation(position - prev)
 
 func reset() -> void:
 	super.reset()
 	hp = get_max_hp()
+	if _anim != null:
+		_facing = "front"
+		_anim.play("front_idle")
 	_arc_started = false
 	_vanished = false
 

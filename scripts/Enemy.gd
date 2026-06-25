@@ -42,6 +42,11 @@ func _ready() -> void:
 func _ground_offset() -> float:
 	return 0.0
 
+# Max distance (px) to the player within which the enemy walks toward them.
+# INF = always chase (default). Subclasses can gate chasing on proximity.
+func _chase_radius() -> float:
+	return INF
+
 func is_dead() -> bool:
 	return _dead
 
@@ -58,7 +63,8 @@ func _process(delta: float) -> void:
 	var target = player.get_body_center()
 	var to_player = target - get_center()
 
-	if to_player.length() > 1.0:
+	var dist = to_player.length()
+	if dist > 1.0 and dist <= _chase_radius():
 		var vel = to_player.normalized() * SPEED * delta
 		_move_x(vel.x)
 		_move_y(vel.y)
