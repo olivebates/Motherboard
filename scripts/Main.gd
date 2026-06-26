@@ -2,8 +2,10 @@ extends Node2D
 
 const TILE_SIZE := 32
 const WORLD_OFFSET := 0
-const ROOM_WIDTH := 25
-const ROOM_HEIGHT := 12
+# Room dimensions live in RoomUtils (single source of truth, shared with the
+# in_room()/room_of() helpers); aliased here so existing call sites stay readable.
+const ROOM_WIDTH := RoomUtils.ROOM_WIDTH
+const ROOM_HEIGHT := RoomUtils.ROOM_HEIGHT
 const ROOM_PIXEL_WIDTH := ROOM_WIDTH * TILE_SIZE
 const ROOM_PIXEL_HEIGHT := ROOM_HEIGHT * TILE_SIZE
 const CAMERA_TWEEN_DURATION := 0.25
@@ -44,6 +46,7 @@ var _black_tint_mat: ShaderMaterial
 
 const ProngScene = preload("res://scenes/player/Prong.tscn")
 const DoorBallScene = preload("res://scripts/DoorBall.gd")
+const BounceEnemyScene = preload("res://scenes/enemies/BounceEnemy.tscn")
 
 const ResetEffectScene = preload("res://scripts/ResetEffect.gd")
 const SplashScreenScene = preload("res://scripts/SplashScreen.gd")
@@ -738,6 +741,36 @@ func redo_last_push() -> void:
 	_trigger_shake(0.8)
 	_update_beam()
 
+# A bounce enemy that was hit by the beam turned into a WindBlock and freed itself.
+# When its room is re-entered (uncompleted) or reset, delete that block and spawn a
+# fresh BounceEnemy back at the enemy's original start tile.
+func _respawn_bounce_wind_blocks(rx0: int, ry0: int) -> void:
+	for wb in get_tree().get_nodes_in_group("bounce_wind_blocks"):
+		if not is_instance_valid(wb) or not wb.has_meta("bounce_start_pos"):
+			continue
+		var spos: Vector2 = wb.get_meta("bounce_start_pos")
+		if RoomUtils.in_room(GridUtils.to_grid(spos), rx0, ry0):
+			wb.queue_free()
+			var e = BounceEnemyScene.instantiate()
+			e.position = spos
+			wall_tilemap.add_child(e)
+
+# Calls reset() on every node in `group` whose tile (via `cell_of`) lies in the
+# room with top-left tile (rx0, ry0). The recurring per-group reset loop shared by
+# _reset_room() and _transition_to_room().
+func _reset_in_room(group: String, rx0: int, ry0: int, cell_of: Callable) -> void:
+	for node in get_tree().get_nodes_in_group(group):
+		if is_instance_valid(node) and RoomUtils.in_room(cell_of.call(node), rx0, ry0):
+			node.reset()
+
+# Tile accessors passed to _reset_in_room() — objects expose their tile either as a
+# `start_grid_pos` property or a `get_grid_pos()` method.
+func _cell_start(node) -> Vector2i:
+	return node.start_grid_pos
+
+func _cell_grid(node) -> Vector2i:
+	return node.get_grid_pos()
+
 func _reset_room() -> void:
 	if _resetting:
 		return
@@ -747,8 +780,7 @@ func _reset_room() -> void:
 	var rx0 := current_room.x * ROOM_WIDTH
 	var ry0 := current_room.y * ROOM_HEIGHT
 	for fan in get_tree().get_nodes_in_group("fans"):
-		var fgp: Vector2i = fan.start_grid_pos
-		if fgp.x >= rx0 and fgp.x < rx0 + ROOM_WIDTH and fgp.y >= ry0 and fgp.y < ry0 + ROOM_HEIGHT:
+		if RoomUtils.in_room(fan.start_grid_pos, rx0, ry0):
 			fan.prepare_reset()
 	# Player plays its death animation in place; the static screen kicks in after the
 	# 3rd frame and the world resets once the static has peaked.
@@ -759,75 +791,42 @@ func _reset_room() -> void:
 	_last_push = null
 	_undo_push = null
 	for p in GameManager.prongs.duplicate():
-		var gp: Vector2i = p["grid_pos"]
-		if gp.x >= rx0 and gp.x < rx0 + ROOM_WIDTH and gp.y >= ry0 and gp.y < ry0 + ROOM_HEIGHT:
+		if RoomUtils.in_room(p["grid_pos"], rx0, ry0):
 			GameManager.remove_prong(p["node"])
 			p["node"].queue_free()
 	_update_beam()
-	for block in get_tree().get_nodes_in_group("push_blocks"):
-		var sgp: Vector2i = block.start_grid_pos
-		if sgp.x >= rx0 and sgp.x < rx0 + ROOM_WIDTH and sgp.y >= ry0 and sgp.y < ry0 + ROOM_HEIGHT:
-			block.reset()
+	_reset_in_room("push_blocks", rx0, ry0, _cell_start)
 	for fan in get_tree().get_nodes_in_group("fans"):
-		var fgp: Vector2i = fan.start_grid_pos
-		if fgp.x >= rx0 and fgp.x < rx0 + ROOM_WIDTH and fgp.y >= ry0 and fgp.y < ry0 + ROOM_HEIGHT:
+		if RoomUtils.in_room(fan.start_grid_pos, rx0, ry0):
 			fan.reset()
-	for wall in get_tree().get_nodes_in_group("breakable_walls"):
-		var wgp: Vector2i = wall.get_grid_pos()
-		if wgp.x >= rx0 and wgp.x < rx0 + ROOM_WIDTH and wgp.y >= ry0 and wgp.y < ry0 + ROOM_HEIGHT:
-			wall.reset()
-	for door in get_tree().get_nodes_in_group("key_doors"):
-		var dgp: Vector2i = door.get_grid_pos()
-		if dgp.x >= rx0 and dgp.x < rx0 + ROOM_WIDTH and dgp.y >= ry0 and dgp.y < ry0 + ROOM_HEIGHT:
-			door.reset()
-	for key in get_tree().get_nodes_in_group("keys"):
-		var kgp: Vector2i = key.start_grid_pos
-		if kgp.x >= rx0 and kgp.x < rx0 + ROOM_WIDTH and kgp.y >= ry0 and kgp.y < ry0 + ROOM_HEIGHT:
-			key.reset()
+	_reset_in_room("breakable_walls", rx0, ry0, _cell_grid)
+	_reset_in_room("key_doors", rx0, ry0, _cell_grid)
+	_reset_in_room("keys", rx0, ry0, _cell_start)
 	var room_solved := SaveManager.is_room_solved(current_room)
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		if not is_instance_valid(enemy):
 			continue
-		var egp := Vector2i(floori(enemy._start_pos.x / TILE_SIZE), floori(enemy._start_pos.y / TILE_SIZE))
-		if egp.x >= rx0 and egp.x < rx0 + ROOM_WIDTH and egp.y >= ry0 and egp.y < ry0 + ROOM_HEIGHT:
-			if enemy.is_in_group("boss_spawned_enemies"):
-				enemy.queue_free()
-			elif enemy.is_in_group("bounce_enemies"):
-				# Bounce enemies don't respawn once killed, but a living one is moved
-				# back to its starting position on any room reset.
-				if not enemy.is_dead():
-					enemy.reset()
-			elif not room_solved:
-				# Other enemies do not respawn in a completed room.
+		if not RoomUtils.in_room(RoomUtils.enemy_start_cell(enemy), rx0, ry0):
+			continue
+		if enemy.is_in_group("boss_spawned_enemies"):
+			enemy.queue_free()
+		elif enemy.is_in_group("bounce_enemies"):
+			# Bounce enemies don't respawn once killed, but a living one is moved
+			# back to its starting position on any room reset.
+			if not enemy.is_dead():
 				enemy.reset()
-	for dust in get_tree().get_nodes_in_group("dust_piles"):
-		var dgp: Vector2i = dust.get_grid_pos()
-		if dgp.x >= rx0 and dgp.x < rx0 + ROOM_WIDTH and dgp.y >= ry0 and dgp.y < ry0 + ROOM_HEIGHT:
-			dust.reset()
-	for turbine in get_tree().get_nodes_in_group("wind_turbines"):
-		var tgp: Vector2i = turbine.get_grid_pos()
-		if tgp.x >= rx0 and tgp.x < rx0 + ROOM_WIDTH and tgp.y >= ry0 and tgp.y < ry0 + ROOM_HEIGHT:
-			turbine.reset()
-	for switch in get_tree().get_nodes_in_group("floor_switches"):
-		var sgp: Vector2i = switch.get_grid_pos()
-		if sgp.x >= rx0 and sgp.x < rx0 + ROOM_WIDTH and sgp.y >= ry0 and sgp.y < ry0 + ROOM_HEIGHT:
-			switch.reset()
-	for edoor in get_tree().get_nodes_in_group("enemy_doors"):
-		var egp: Vector2i = edoor.get_grid_pos()
-		if egp.x >= rx0 and egp.x < rx0 + ROOM_WIDTH and egp.y >= ry0 and egp.y < ry0 + ROOM_HEIGHT:
-			edoor.reset()
-	for droid in get_tree().get_nodes_in_group("nanodroids"):
-		var ngp: Vector2i = droid.start_grid_pos
-		if ngp.x >= rx0 and ngp.x < rx0 + ROOM_WIDTH and ngp.y >= ry0 and ngp.y < ry0 + ROOM_HEIGHT:
-			droid.reset()
-	for hole in get_tree().get_nodes_in_group("holes"):
-		var hgp: Vector2i = hole.get_grid_pos()
-		if hgp.x >= rx0 and hgp.x < rx0 + ROOM_WIDTH and hgp.y >= ry0 and hgp.y < ry0 + ROOM_HEIGHT:
-			hole.reset()
-	for capacitor in get_tree().get_nodes_in_group("capacitors"):
-		var cgp: Vector2i = capacitor.get_grid_pos()
-		if cgp.x >= rx0 and cgp.x < rx0 + ROOM_WIDTH and cgp.y >= ry0 and cgp.y < ry0 + ROOM_HEIGHT:
-			capacitor.reset()
+		elif not room_solved:
+			# Other enemies do not respawn in a completed room.
+			enemy.reset()
+	if not room_solved:
+		_respawn_bounce_wind_blocks(rx0, ry0)
+	_reset_in_room("dust_piles", rx0, ry0, _cell_grid)
+	_reset_in_room("wind_turbines", rx0, ry0, _cell_grid)
+	_reset_in_room("floor_switches", rx0, ry0, _cell_grid)
+	_reset_in_room("enemy_doors", rx0, ry0, _cell_grid)
+	_reset_in_room("nanodroids", rx0, ry0, _cell_start)
+	_reset_in_room("holes", rx0, ry0, _cell_grid)
+	_reset_in_room("capacitors", rx0, ry0, _cell_grid)
 	# Respawn under the static at its peak; reset_to() cuts the death animation short
 	# if it hasn't finished playing yet.
 	player.reset_to(room_entry_positions.get(current_room, Vector2i(2, 2)))
@@ -989,14 +988,12 @@ func _transition_to_room(new_room: Vector2i, auto_unlock: bool = true) -> void:
 	var old_ry0 = current_room.y * ROOM_HEIGHT
 
 	for fan in get_tree().get_nodes_in_group("fans"):
-		var fgp: Vector2i = fan.start_grid_pos
-		if fgp.x >= old_rx0 and fgp.x < old_rx0 + ROOM_WIDTH and fgp.y >= old_ry0 and fgp.y < old_ry0 + ROOM_HEIGHT:
+		if RoomUtils.in_room(fan.start_grid_pos, old_rx0, old_ry0):
 			fan._clear_particles()
 	for enemy in get_tree().get_nodes_in_group("boss_spawned_enemies"):
 		if not is_instance_valid(enemy):
 			continue
-		var egp = Vector2i(floori(enemy._start_pos.x / TILE_SIZE), floori(enemy._start_pos.y / TILE_SIZE))
-		if egp.x >= old_rx0 and egp.x < old_rx0 + ROOM_WIDTH and egp.y >= old_ry0 and egp.y < old_ry0 + ROOM_HEIGHT:
+		if RoomUtils.in_room(RoomUtils.enemy_start_cell(enemy), old_rx0, old_ry0):
 			enemy.queue_free()
 
 	current_room = new_room
@@ -1006,20 +1003,13 @@ func _transition_to_room(new_room: Vector2i, auto_unlock: bool = true) -> void:
 	var ery0 := current_room.y * ROOM_HEIGHT
 	# Enemies do not respawn in a completed room.
 	var entered_room_solved := SaveManager.is_room_solved(current_room)
-	for enemy in get_tree().get_nodes_in_group("enemies"):
-		if entered_room_solved:
-			continue
-		var egp := Vector2i(floori(enemy._start_pos.x / TILE_SIZE), floori(enemy._start_pos.y / TILE_SIZE))
-		if egp.x >= erx0 and egp.x < erx0 + ROOM_WIDTH and egp.y >= ery0 and egp.y < ery0 + ROOM_HEIGHT:
-			enemy.reset()
-	for hole in get_tree().get_nodes_in_group("holes"):
-		var hgp: Vector2i = hole.get_grid_pos()
-		if hgp.x >= erx0 and hgp.x < erx0 + ROOM_WIDTH and hgp.y >= ery0 and hgp.y < ery0 + ROOM_HEIGHT:
-			hole.reset()
-	for block in get_tree().get_nodes_in_group("push_blocks"):
-		var sgp: Vector2i = block.start_grid_pos
-		if sgp.x >= erx0 and sgp.x < erx0 + ROOM_WIDTH and sgp.y >= ery0 and sgp.y < ery0 + ROOM_HEIGHT:
-			block.reset()
+	if not entered_room_solved:
+		for enemy in get_tree().get_nodes_in_group("enemies"):
+			if RoomUtils.in_room(RoomUtils.enemy_start_cell(enemy), erx0, ery0):
+				enemy.reset()
+		_respawn_bounce_wind_blocks(erx0, ery0)
+	_reset_in_room("holes", erx0, ery0, _cell_grid)
+	_reset_in_room("push_blocks", erx0, ery0, _cell_start)
 
 	var anchor := _get_anchor_for_room(new_room)
 	if anchor != null and anchor.color != modulate:
@@ -1051,8 +1041,7 @@ func _get_anchor_for_room(room: Vector2i) -> Node:
 	var rx0 := room.x * ROOM_WIDTH
 	var ry0 := room.y * ROOM_HEIGHT
 	for anchor in get_tree().get_nodes_in_group("teleport_anchors"):
-		var gp := Vector2i(floori(anchor.position.x / TILE_SIZE), floori(anchor.position.y / TILE_SIZE))
-		if gp.x >= rx0 and gp.x < rx0 + ROOM_WIDTH and gp.y >= ry0 and gp.y < ry0 + ROOM_HEIGHT:
+		if RoomUtils.in_room(GridUtils.to_grid(anchor.position), rx0, ry0):
 			return anchor
 	return null
 
@@ -1079,7 +1068,7 @@ func get_open_teleport_panel_rooms() -> Array:
 		if not panel.is_open or panel.one_way:
 			continue
 		var gp: Vector2i = panel.get_grid_pos()
-		var room := Vector2i(floori(float(gp.x) / ROOM_WIDTH), floori(float(gp.y) / ROOM_HEIGHT))
+		var room := RoomUtils.room_of(gp)
 		if not rooms.has(room):
 			rooms.append(room)
 	return rooms
@@ -1090,8 +1079,7 @@ func _get_open_panel_for_room(room: Vector2i) -> Node:
 	for panel in get_tree().get_nodes_in_group("teleport_panels"):
 		if not panel.is_open:
 			continue
-		var gp: Vector2i = panel.get_grid_pos()
-		if gp.x >= rx0 and gp.x < rx0 + ROOM_WIDTH and gp.y >= ry0 and gp.y < ry0 + ROOM_HEIGHT:
+		if RoomUtils.in_room(panel.get_grid_pos(), rx0, ry0):
 			return panel
 	return null
 
@@ -1181,7 +1169,7 @@ func _update_beam() -> void:
 		# Path stores Vector2 for prong endpoints and Node2D for nuts so ElectricBeam
 		# can resolve nut positions each frame and follow the sliding sprite.
 		path = BeamUtils.best_beam_path(blockers, world_positions[0], world_positions[1], nuts)
-	BeamUtils.apply_beam_result(electric_beam, blockers, world_positions, path, nuts)
+	BeamUtils.apply_beam_result(electric_beam, blockers, world_positions, path)
 
 func _gather_chain_nuts() -> Array:
 	var rx0 := current_room.x * ROOM_WIDTH
@@ -1189,8 +1177,7 @@ func _gather_chain_nuts() -> Array:
 	var nut_nodes: Array = []
 	if GameManager.has_ability("chain"):
 		for nut in get_tree().get_nodes_in_group("nuts"):
-			var gp: Vector2i = nut.grid_pos
-			if gp.x >= rx0 and gp.x < rx0 + ROOM_WIDTH and gp.y >= ry0 and gp.y < ry0 + ROOM_HEIGHT:
+			if RoomUtils.in_room(nut.grid_pos, rx0, ry0):
 				nut_nodes.append(nut)
 	return nut_nodes
 

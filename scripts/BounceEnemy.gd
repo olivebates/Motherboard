@@ -92,6 +92,10 @@ func _try_finish_transform() -> bool:
 	# Parent under the same node the enemy lives in (the Walls TileMapLayer in Main,
 	# y_sort_root in the editor) so the new block depth-sorts correctly.
 	get_parent().add_child(wb)
+	# Tag the block so the room can revert it to a fresh BounceEnemy at this enemy's
+	# start tile when re-entered (uncompleted) or reset.
+	wb.add_to_group("bounce_wind_blocks")
+	wb.set_meta("bounce_start_pos", _start_pos - Vector2(0.0, _ground_offset()))
 	_main._trigger_shake(4.0)
 	queue_free()
 	return true

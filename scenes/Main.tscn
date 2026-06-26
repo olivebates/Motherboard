@@ -693,6 +693,9 @@ position = Vector2(2304, 192)
 [node name="Key14" parent="." instance=ExtResource("14_3p2gp")]
 position = Vector2(2720, 128)
 
+[node name="Key57" parent="." instance=ExtResource("14_3p2gp")]
+position = Vector2(2720, 192)
+
 [node name="Key17" parent="." instance=ExtResource("14_3p2gp")]
 position = Vector2(3296, 64)
 
@@ -2877,18 +2880,6 @@ position = Vector2(-2016, -64)
 
 [node name="LightningBlocker197" parent="." instance=ExtResource("7_nxtc6")]
 position = Vector2(3040, 1344)
-
-[node name="LightningBlocker167" parent="." instance=ExtResource("7_nxtc6")]
-position = Vector2(2752, 192)
-
-[node name="LightningBlocker168" parent="." instance=ExtResource("7_nxtc6")]
-position = Vector2(2784, 192)
-
-[node name="LightningBlocker170" parent="." instance=ExtResource("7_nxtc6")]
-position = Vector2(2720, 192)
-
-[node name="LightningBlocker171" parent="." instance=ExtResource("7_nxtc6")]
-position = Vector2(2688, 192)
 
 [node name="LightningBlocker229" parent="." instance=ExtResource("7_nxtc6")]
 position = Vector2(2912, 192)

@@ -1538,7 +1538,7 @@ func _update_beam() -> void:
 	var path: Array = []
 	if world_positions.size() == 2:
 		path = BeamUtils.best_beam_path(blockers, world_positions[0], world_positions[1], nuts)
-	BeamUtils.apply_beam_result(_play_beam, blockers, world_positions, path, nuts)
+	BeamUtils.apply_beam_result(_play_beam, blockers, world_positions, path)
 
 func _reset_room() -> void:
 	if _play_player == null or not is_instance_valid(_play_player):

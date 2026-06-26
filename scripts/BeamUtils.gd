@@ -103,12 +103,6 @@ static func _is_better_route(nut_count: int, crosses: bool, total_len: float, be
 		return not crosses
 	return total_len < best["len"]
 
-## Resolves a path entry (Vector2 endpoint or Node2D nut) to its world point.
-static func _beam_point_of(entry) -> Vector2:
-	if entry is Vector2:
-		return entry
-	return entry.get_beam_point()
-
 ## True if the new segment `seg_a`→`seg_b` (where `seg_a == coords[order.back()]`)
 ## crosses any earlier segment of the route. The immediately preceding segment is
 ## skipped — it shares `seg_a`, so they only touch, not cross.
@@ -122,38 +116,6 @@ static func _order_self_crosses(order: Array, coords: Array, seg_a: Vector2, seg
 			return true
 	return false
 
-## Number of nuts a returned path passes through (path = [start, …nuts, target]).
-static func _path_nut_count(path: Array) -> int:
-	if path.size() < 2:
-		return -1
-	return path.size() - 2
-
-## Blockers to blink as a "you could thread more nuts" hint. Recomputes the best
-## route ignoring blockers (`best_beam_path` with no blockers always at least
-## connects start→target). If that ideal route passes through more nuts than the
-## actual `clear_path`, returns the blockers lying on the ideal route (expanded to
-## their connected groups, matching the blocked-beam flash). Otherwise [].
-static func better_nut_hint_blockers(blockers: Array, start: Vector2, target: Vector2, nuts: Array, clear_path: Array) -> Array:
-	if blockers.is_empty() or nuts.is_empty():
-		return []
-	# If the live beam already threads every nut, no route can beat it — skip the
-	# (factorial) second search entirely. This is the common case.
-	if _path_nut_count(clear_path) >= nuts.size():
-		return []
-	var ideal := best_beam_path([], start, target, nuts)
-	if _path_nut_count(ideal) <= _path_nut_count(clear_path):
-		return []
-	var on_route: Array = []
-	var seen: Dictionary = {}
-	for i in range(ideal.size() - 1):
-		var a := _beam_point_of(ideal[i])
-		var b := _beam_point_of(ideal[i + 1])
-		for blk in beam_blockers(blockers, a, b):
-			if not seen.has(blk):
-				seen[blk] = true
-				on_route.append(blk)
-	return expand_connected(blockers, on_route)
-
 ## Applies a freshly computed beam result — the shared body of Main and
 ## LevelEditor `_update_beam()`. `world_positions` is the prong world positions (0,
 ## 1 or 2 of them); `path` is the routed beam path (or [] when there is no clear
@@ -162,7 +124,7 @@ static func better_nut_hint_blockers(blockers: Array, start: Vector2, target: Ve
 ## blockers, and updates GameManager puzzle state (beam_blocked / conductor points /
 ## evaluate_puzzle). Callers keep their own (divergent) path computation; only this
 ## tail is shared.
-static func apply_beam_result(beam: Node, blockers: Array, world_positions: Array, path: Array, nuts: Array = []) -> void:
+static func apply_beam_result(beam: Node, blockers: Array, world_positions: Array, path: Array) -> void:
 	if world_positions.size() == 2:
 		if path.is_empty():
 			# No clear route — flash the blockers on the direct line so the player
@@ -180,11 +142,9 @@ static func apply_beam_result(beam: Node, blockers: Array, world_positions: Arra
 			GameManager.set_beam_conductors_from_path(path)
 			GameManager.evaluate_puzzle()
 			beam.activate(path)
-			# The beam works, but if a route through MORE nuts exists and is only
-			# being held back by lightning blockers, blink those blockers as a hint.
-			var hint := better_nut_hint_blockers(blockers, world_positions[0], world_positions[1], nuts, path)
+			# A clear route exists, so no blocker is in the way — none should activate.
 			for b in blockers:
-				b.set_blocking(b in hint)
+				b.set_blocking(false)
 	else:
 		GameManager.beam_blocked = false
 		GameManager.beam_conductor_points.clear()

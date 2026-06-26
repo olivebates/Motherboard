@@ -211,6 +211,8 @@ func _build_save_data() -> Dictionary:
 			var rv := room as Vector2i
 			visited.append([rv.x, rv.y])
 	data["map_visited"] = visited
+	if main.map_overlay != null:
+		data["map_hint_state"] = main.map_overlay.get_hint_state()
 
 	return data
 
@@ -416,6 +418,8 @@ func _apply_load(data: Dictionary) -> void:
 		visited_dict[Vector2i(int(rv[0]), int(rv[1]))] = true
 	if main.map_overlay != null:
 		main.map_overlay.set_visited(visited_dict)
+		if data.has("map_hint_state"):
+			main.map_overlay.set_hint_state(data["map_hint_state"])
 
 	# Audio volumes
 	if data.has("music_volume"):

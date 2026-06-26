@@ -311,6 +311,11 @@ func _count_minions() -> int:
 	for e in get_tree().get_nodes_in_group("water_enemies"):
 		if not is_instance_valid(e) or e == self:
 			continue
+		# Dead minions still linger in the tree (Enemy._die() only hides them), so
+		# skip them — a slot frees up the moment a spawned minion is killed, letting
+		# the boss replace it while still honouring the cap.
+		if e._dead:
+			continue
 		var egp = Vector2i(floori(e._start_pos.x / TILE_SIZE), floori(e._start_pos.y / TILE_SIZE))
 		if egp.x >= rx0 and egp.x < rx0 + 25 and egp.y >= ry0 and egp.y < ry0 + 12:
 			count += 1

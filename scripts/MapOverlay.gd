@@ -64,6 +64,25 @@ func set_visited(d: Dictionary) -> void:
 	if _open:
 		_draw_node.queue_redraw()
 
+# Persisted tutorial state: whether the pulsing (growing/shrinking) Space / WASD
+# instruction hints have been deactivated, plus the first-open delay tracking.
+func get_hint_state() -> Dictionary:
+	return {
+		"space_hint_done": _space_hint_done,
+		"wasd_hint_done": _wasd_hint_done,
+		"first_two_done": _first_two_done,
+		"first_teleport_room_set": _first_teleport_room_set,
+		"first_teleport_room": [_first_teleport_room.x, _first_teleport_room.y],
+	}
+
+func set_hint_state(d: Dictionary) -> void:
+	_space_hint_done = d.get("space_hint_done", false)
+	_wasd_hint_done = d.get("wasd_hint_done", false)
+	_first_two_done = d.get("first_two_done", false)
+	_first_teleport_room_set = d.get("first_teleport_room_set", false)
+	var r = d.get("first_teleport_room", [-9999, -9999])
+	_first_teleport_room = Vector2i(int(r[0]), int(r[1]))
+
 func _process(delta: float) -> void:
 	if not _open:
 		return
@@ -108,6 +127,9 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed("place_prong"):
 		var cur_room: Vector2i = _main.current_room if _main else Vector2i.ZERO
 		if _cursor == cur_room:
+			# Can't teleport to the room you're already in — shake and buzz.
+			GameManager.shake_requested.emit(8.0)
+			AudioManager.play_sfx("electric_fail")
 			return
 		if _open_panel_rooms.has(_cursor):
 			_space_hint_done = true
