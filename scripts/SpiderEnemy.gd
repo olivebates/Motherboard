@@ -16,7 +16,45 @@ const COOLDOWN_TIME = 0.4
 const PRE_WAKE_TIME = 0.8
 const STUN_TEX = preload("res://Sprites/objects/switch_open2.png")
 
-enum State { IDLE, ROTATING, PRE_LUNGE, LUNGING, RETRACTING, COOLDOWN, STUNNED }
+# Layered animation sheets (all 64×64 frames in a single horizontal strip). The
+# idle body and the legs are separate layers stacked at the same center: idle on
+# top, legs underneath. Pullback and pounce are complete spiders (legs baked in),
+# so the separate legs layer is hidden while they play.
+const _SHEET_IDLE = "res://Sprites/enemies/Spider/Spider_idle_before_pounce-Sheet-export.webp"
+const _SHEET_LEGS = "res://Sprites/enemies/Spider/Spider_legs_rotate-Sheet-export.webp"
+const _SHEET_PULLBACK = "res://Sprites/enemies/Spider/Spider_pullback-Sheet-export.webp"
+const _SHEET_POUNCE = "res://Sprites/enemies/Spider/Spider_pounce-Sheet.webp"
+const _FRAME_SIZE = 64
+const _BODY_IDLE_FRAMES = 6
+const _LEGS_FRAMES = 11
+const _PULLBACK_FRAMES = 8
+const _POUNCE_FRAMES = 3
+const _BODY_IDLE_FPS = 8.0
+const _LEGS_FPS = 28.0
+# Pullback completes within the pre-lunge wind-up, then holds its last frame.
+const _PULLBACK_FPS = _PULLBACK_FRAMES / PRE_LUNGE_TIME
+const _POUNCE_FPS = 24.0
+# Legs only shuffle while the body is actively turning; below this angular speed
+# (rad/s) they freeze on their current frame.
+const _LEGS_ROTATE_THRESHOLD = 0.2
+# Local rotation offset for the art so it aligns with `_angle` (90° CCW; Godot
+# rotation is clockwise for +, so CCW is negative).
+const _SPRITE_ROT_OFFSET = -PI / 2
+# Per-animation vertical nudge (sheet space, negative = toward the head) so the
+# pullback/pounce bodies line up with the idle body. The pullback sheet is
+# authored ~12px lower than idle; pounce already matches. Tune if the art moves.
+const _PULLBACK_Y_OFFSET = -12.0
+const _POUNCE_Y_OFFSET = 0.0
+
+# Speed the spider scurries away from light (px/s) — roughly twice its normal crawl so
+# it can actually break free of a light circle that's closing on it.
+const FLEE_SPEED = 147.0
+# Only a powered LightSource's light scares the spider (not the player's light). It
+# starts fleeing when inside a source's LIGHT_RADIUS and keeps going until it is
+# FLEE_EXIT_RADIUS px clear of the light (hysteresis, so it doesn't stall at the edge).
+const FLEE_EXIT_RADIUS = 152.0
+
+enum State { IDLE, ROTATING, PRE_LUNGE, LUNGING, RETRACTING, COOLDOWN, STUNNED, FLEEING }
 
 var _state = State.IDLE
 var _angle = PI / 2
@@ -34,19 +72,101 @@ var _shake_mag = 0.0
 var _shake_timer = 0.0
 var _shake_dur = 0.001
 var _normal_tex: Texture2D = null
+var _body: AnimatedSprite2D = null
+var _legs: AnimatedSprite2D = null
 
 @onready var _hitbox_col: CollisionShape2D = $HitboxArea/HitboxShape
 
 func _ready() -> void:
 	super._ready()
 	hp = SPIDER_MAX_HP
-	_normal_tex = _sprite.texture
 	_sprite.centered = true
 	_sprite.position = Vector2(16.0, 16.0 - _ground_offset())
 	_sprite.rotation = _angle
+	# _sprite becomes a transform-only container; the animation layers (children)
+	# inherit its position/rotation. _normal_tex stays null (only the stun pose
+	# ever puts a texture back on _sprite).
+	_setup_anim_layers()
+	_sprite.texture = null
+	_normal_tex = null
 	# Keep the hitbox node at the tile center despite the origin shift.
 	$HitboxArea.position.y -= _ground_offset()
 	_lunge_initial_speed = LUNGE_TRAVEL * LUNGE_DECAY / (1.0 - exp(-LUNGE_DECAY * LUNGE_DURATION))
+
+func _add_spider_strip(frames: SpriteFrames, anim: String, path: String, count: int, fps: float, looped: bool) -> void:
+	var tex: Texture2D = load(path)
+	frames.add_animation(anim)
+	frames.set_animation_speed(anim, fps)
+	frames.set_animation_loop(anim, looped)
+	for i in range(count):
+		var atlas = AtlasTexture.new()
+		atlas.atlas = tex
+		atlas.region = Rect2(i * _FRAME_SIZE, 0, _FRAME_SIZE, _FRAME_SIZE)
+		frames.add_frame(anim, atlas)
+
+func _setup_anim_layers() -> void:
+	var legs_frames = SpriteFrames.new()
+	legs_frames.remove_animation("default")
+	_add_spider_strip(legs_frames, "legs", _SHEET_LEGS, _LEGS_FRAMES, _LEGS_FPS, true)
+	_legs = AnimatedSprite2D.new()
+	_legs.sprite_frames = legs_frames
+	_legs.centered = true
+	_legs.rotation = _SPRITE_ROT_OFFSET
+	_legs.play("legs")
+	_legs.pause()
+
+	var body_frames = SpriteFrames.new()
+	body_frames.remove_animation("default")
+	_add_spider_strip(body_frames, "idle", _SHEET_IDLE, _BODY_IDLE_FRAMES, _BODY_IDLE_FPS, true)
+	_add_spider_strip(body_frames, "pullback", _SHEET_PULLBACK, _PULLBACK_FRAMES, _PULLBACK_FPS, false)
+	_add_spider_strip(body_frames, "pounce", _SHEET_POUNCE, _POUNCE_FRAMES, _POUNCE_FPS, false)
+	_body = AnimatedSprite2D.new()
+	_body.sprite_frames = body_frames
+	_body.centered = true
+	_body.rotation = _SPRITE_ROT_OFFSET
+	_body.play("idle")
+
+	# Legs added first so they draw underneath the body.
+	_sprite.add_child(_legs)
+	_sprite.add_child(_body)
+
+# Applies the visuals for the current state. Idempotent — only (re)plays an
+# animation when it isn't already the active one, so non-looping pullback/pounce
+# play once and hold their last frame.
+func _apply_animation() -> void:
+	match _state:
+		State.STUNNED:
+			pass  # handled in _enter_stun / _wake_from_stun
+		State.PRE_LUNGE:
+			_legs.visible = false
+			_body.offset.y = _PULLBACK_Y_OFFSET
+			if _body.animation != "pullback":
+				_body.play("pullback")
+		State.LUNGING:
+			_legs.visible = false
+			_body.offset.y = _POUNCE_Y_OFFSET
+			if _body.animation != "pounce":
+				_body.play("pounce")
+		_:
+			# IDLE / ROTATING / RETRACTING / COOLDOWN: idle body over the legs.
+			_legs.visible = true
+			_body.offset.y = 0.0
+			if _body.animation != "idle":
+				_body.play("idle")
+			# The body idle stays frozen until the player is within turning range
+			# (any state past IDLE); it only breathes once the spider has woken.
+			if _state == State.IDLE and _body.is_playing():
+				_body.pause()
+			elif _state != State.IDLE and not _body.is_playing():
+				_body.play("idle")
+			# Legs shuffle while the body is turning (ROTATING), crawling back in
+			# (RETRACTING), or scurrying from light (FLEEING); else they freeze.
+			var crawling = (_state == State.ROTATING and absf(_angle_velocity) > _LEGS_ROTATE_THRESHOLD) \
+				or _state == State.RETRACTING or _state == State.FLEEING
+			if crawling and not _legs.is_playing():
+				_legs.play("legs")
+			elif not crawling and _legs.is_playing():
+				_legs.pause()
 
 func _hitbox(pos: Vector2) -> Rect2:
 	var half: Vector2
@@ -73,10 +193,17 @@ func _enter_stun() -> void:
 	_state = State.STUNNED
 	_stun_timer = STUN_TIME
 	_angle_velocity = 0.0
+	_body.visible = false
+	_legs.visible = false
 	_sprite.texture = STUN_TEX
 
 func _wake_from_stun() -> void:
 	_sprite.texture = _normal_tex
+	_body.visible = true
+	_legs.visible = true
+	_body.play("idle")
+	_legs.play("legs")
+	_legs.pause()
 	hp = SPIDER_MAX_HP
 	_angle = PI / 2
 	_angle_velocity = 0.0
@@ -124,6 +251,22 @@ func _process(delta: float) -> void:
 		return
 
 	var player = _main.player
+
+	# Light-averse: in a dark room a powered LightSource's light makes the spider flee,
+	# overriding its hunt/lunge behaviour (it ignores the player's own light). It keeps
+	# fleeing until FLEE_EXIT_RADIUS clear (hysteresis), then crawls home.
+	var flee = _main.light_flee_vector(get_center(), FLEE_EXIT_RADIUS, _state == State.FLEEING) if _main.has_method("light_flee_vector") else Vector2.ZERO
+	if _state != State.STUNNED:
+		if flee != Vector2.ZERO and _state != State.FLEEING:
+			_state = State.FLEEING
+			_angle_velocity = 0.0
+		elif flee == Vector2.ZERO and _state == State.FLEEING:
+			# It got away — adopt the new spot as home (it hunts/retracts from here
+			# now) instead of crawling back to where it started.
+			_start_pos = position
+			_visual_pos = position
+			_state = State.COOLDOWN
+			_cooldown_timer = COOLDOWN_TIME
 
 	match _state:
 		State.IDLE:
@@ -196,12 +339,26 @@ func _process(delta: float) -> void:
 			if _cooldown_timer <= 0.0:
 				_state = State.IDLE
 
+		State.FLEEING:
+			var dir = flee.normalized()
+			# Turn to face away from the light (legs/body point in the flee direction).
+			var target_angle = dir.angle()
+			var diff = angle_difference(_angle, target_angle)
+			_angle_velocity += (diff * ANGLE_STIFFNESS - _angle_velocity * ANGLE_DAMPING) * delta
+			_angle += _angle_velocity * delta
+			_sprite.rotation = _angle
+			var move = dir * FLEE_SPEED * delta
+			_move_x(move.x)
+			_move_y(move.y)
+
 		State.STUNNED:
 			_stun_timer -= delta
 			if _stun_timer <= PRE_WAKE_TIME and _shake_timer <= 0.0:
 				_start_shake(1.5, PRE_WAKE_TIME)
 			if _stun_timer <= 0.0:
 				_wake_from_stun()
+
+	_apply_animation()
 
 	if _state != State.STUNNED:
 		if not player.movement_locked and (player.get_body_center() - get_center()).length() < CONTACT_DIST:
@@ -212,8 +369,14 @@ func reset() -> void:
 	_sprite.centered = true
 	_sprite.position = Vector2(16.0, 16.0 - _ground_offset())
 	_sprite.rotation = _angle
-	if _normal_tex != null:
-		_sprite.texture = _normal_tex
+	_sprite.texture = _normal_tex
+	if _body != null:
+		_body.visible = true
+		_body.play("idle")
+	if _legs != null:
+		_legs.visible = true
+		_legs.play("legs")
+		_legs.pause()
 	_state = State.IDLE
 	_angle = PI / 2
 	_angle_velocity = 0.0

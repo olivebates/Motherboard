@@ -291,17 +291,47 @@ func _unhandled_input(event: InputEvent) -> void:
 				_try_room_teleport(dir)
 
 func _try_prong_teleport() -> bool:
-	var prongs = get_tree().get_nodes_in_group("prongs")
-	if prongs.size() != 2:
+	var stops := _build_teleport_cycle()
+	if stops.size() < 2:
 		return false
 	var my_center = get_body_center()
-	for i in range(2):
-		var prong_center = prongs[i].hitbox_center()
-		if my_center.distance_to(prong_center) < 24.0:
-			var other_center = prongs[1 - i].hitbox_center()
-			_main.teleport_between_prongs(other_center)
+	for i in range(stops.size()):
+		if my_center.distance_to(stops[i]) < 24.0:
+			_main.teleport_between_prongs(stops[(i - 1 + stops.size()) % stops.size()])
 			return true
 	return false
+
+# Ordered ring of teleport stops (player body-center targets): prong A, then each
+# screw / nut-filled hole the active beam chains through in beam order, then prong B.
+# Pressing prong_teleport while standing on any stop hops to the PREVIOUS one
+# (wrapping) — i.e. the ring is ridden in reverse beam order. With no active chained
+# route this is just the two prongs — i.e. the classic prong-to-prong hop.
+func _build_teleport_cycle() -> Array:
+	var prongs = get_tree().get_nodes_in_group("prongs")
+	if prongs.size() != 2:
+		return []
+	var path: Array = GameManager.beam_path
+	if path.size() < 2:
+		return [prongs[0].hitbox_center(), prongs[1].hitbox_center()]
+	var stops: Array = [_nearest_prong_center(prongs, path[0])]
+	for k in range(1, path.size() - 1):
+		var entry = path[k]
+		# Only screws and nut-filled holes are ridable stops; plain pushable nuts
+		# conduct but are not teleport targets.
+		if entry is Node2D and (entry.is_in_group("screws") or entry.is_in_group("holes")):
+			stops.append(GridUtils.tile_center(GridUtils.to_world(entry.get_grid_pos())))
+	stops.append(_nearest_prong_center(prongs, path[path.size() - 1]))
+	return stops
+
+func _nearest_prong_center(prongs: Array, point: Vector2) -> Vector2:
+	var best = prongs[0]
+	var best_d = best.circuit_pos.distance_to(point)
+	for p in prongs:
+		var d = p.circuit_pos.distance_to(point)
+		if d < best_d:
+			best_d = d
+			best = p
+	return best.hitbox_center()
 
 func _try_room_teleport(dir: Vector2i) -> void:
 	var target_room = _main.current_room + dir

@@ -36,6 +36,11 @@ var map_overlay: Node
 var ability_message: Node
 var _color_tween: Tween = null
 
+# Dark-room lighting. PLAYER_LIGHT_RADIUS is the lit circle carried by the player;
+# LightSource objects carry their own radius. See DarknessOverlay.gd.
+const PLAYER_LIGHT_RADIUS := 64.0
+var _darkness: DarknessOverlay
+
 var _tab_canvas: CanvasLayer
 var _tab_label: Label
 
@@ -106,6 +111,8 @@ func _ready() -> void:
 	_tab_label.add_theme_constant_override("outline_size", 2)
 	_tab_canvas.add_child(_tab_label)
 	queue_redraw()
+	_darkness = DarknessOverlay.new()
+	add_child(_darkness)
 	var start_anchor := _get_anchor_for_room(current_room)
 	if start_anchor != null:
 		modulate = start_anchor.color
@@ -113,6 +120,7 @@ func _ready() -> void:
 		room_entry_positions[current_room] = Vector2i(floori(start_anchor.position.x / TILE_SIZE), floori(start_anchor.position.y / TILE_SIZE))
 		if start_anchor.music != "":
 			AudioManager.set_music(start_anchor.music)
+	_darkness.set_dark(_is_room_dark(current_room), false)
 	if not SaveManager.skip_splash:
 		var splash := SplashScreenScene.new()
 		add_child(splash)
@@ -605,6 +613,8 @@ func _process(delta: float) -> void:
 	_shake_amount = lerpf(_shake_amount, 0.0, 9.0 * delta)
 	camera.offset = Vector2(randf_range(-1.6, 1.6), randf_range(-1.6, 1.6)) * _shake_amount
 	_update_tab_label()
+	if _darkness != null and _darkness.visible:
+		_darkness.update_lights(camera, _gather_lights())
 	if modulate != _last_btn_color:
 		_last_btn_color = modulate
 		_refresh_settings_colors(modulate)
@@ -676,70 +686,27 @@ func record_push(block: Node, from_pos: Vector2i, dir: Vector2i) -> void:
 	_last_push = {"block": block, "from": from_pos, "dir": dir}
 	_undo_push = null
 
+# Push undo/redo geometry lives in PushHistoryUtils (shared with LevelEditor's
+# playtest); this scene just keeps the one-deep history pointers.
 func undo_last_push() -> void:
 	if _last_push == null:
 		return
-	var entry = _last_push
-	var block = entry.block
-	if not is_instance_valid(block):
+	if not is_instance_valid(_last_push.block):
 		_last_push = null
 		return
-	var from_pos: Vector2i = entry.from
-	var dir: Vector2i = entry.dir
-	# Any actor (player, nanodroid, enemy) standing where the block is returning to
-	# gets shoved one tile in -dir; if that tile is blocked, the undo is refused.
-	var shoved := []
-	for actor in _push_actors():
-		if PushUtils.actor_tile(actor) == from_pos:
-			shoved.append(actor)
-	if not shoved.is_empty() and is_blocked(from_pos - dir):
-		AudioManager.play_sfx("electric_fail")
-		return
-	_last_push = null
-	_undo_push = entry
-	var block_rect = Rect2(from_pos.x * TILE_SIZE, from_pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-	for actor in shoved:
-		PushUtils.displace_actor(actor, block_rect, dir)
-	block.push_undo(from_pos)
-	_trigger_shake(0.8)
-	_update_beam()
-
-# Actors that a returning/advancing block can shove, mirroring the player.
-func _push_actors() -> Array:
-	var actors := []
-	if player != null and is_instance_valid(player):
-		actors.append(player)
-	for nd in get_tree().get_nodes_in_group("nanodroids"):
-		if is_instance_valid(nd) and not nd._destroyed:
-			actors.append(nd)
-	for e in get_tree().get_nodes_in_group("enemies"):
-		if is_instance_valid(e) and not e.is_dead():
-			actors.append(e)
-	return actors
+	if PushHistoryUtils.apply_undo(self, _last_push):
+		_undo_push = _last_push
+		_last_push = null
 
 func redo_last_push() -> void:
 	if _undo_push == null:
 		return
-	var entry = _undo_push
-	var block = entry.block
-	if not is_instance_valid(block):
+	if not is_instance_valid(_undo_push.block):
 		_undo_push = null
 		return
-	var from_pos: Vector2i = entry.from
-	var dir: Vector2i = entry.dir
-	var dest = from_pos + dir
-	if not can_push_block_to(dest):
-		return
-	# A block can't be redone onto a tile any actor is standing on.
-	for actor in _push_actors():
-		if PushUtils.actor_tile(actor) == dest:
-			AudioManager.play_sfx("electric_fail")
-			return
-	_undo_push = null
-	_last_push = entry
-	block.push(dir)
-	_trigger_shake(0.8)
-	_update_beam()
+	if PushHistoryUtils.apply_redo(self, _undo_push):
+		_last_push = _undo_push
+		_undo_push = null
 
 # A bounce enemy that was hit by the beam turned into a WindBlock and freed itself.
 # When its room is re-entered (uncompleted) or reset, delete that block and spawn a
@@ -853,9 +820,6 @@ func _is_static_solid(grid_pos: Vector2i, include_holes: bool = true) -> bool:
 			return true
 	for panel in get_tree().get_nodes_in_group("teleport_panels"):
 		if not panel.is_open and panel.get_grid_pos() == grid_pos:
-			return true
-	for screw in get_tree().get_nodes_in_group("screws"):
-		if screw.get_grid_pos() == grid_pos:
 			return true
 	for wall in get_tree().get_nodes_in_group("breakable_walls"):
 		if not wall._destroyed and wall.get_grid_pos() == grid_pos:
@@ -1021,6 +985,11 @@ func _transition_to_room(new_room: Vector2i, auto_unlock: bool = true) -> void:
 	if anchor != null and anchor.music != "":
 		AudioManager.set_music(anchor.music)
 
+	# Fade the black overlay in (over DarknessOverlay.FADE_DURATION = 0.15s) when
+	# entering a dark room; fade it back out when entering a lit one.
+	if _darkness != null:
+		_darkness.set_dark(_is_room_dark(new_room), true)
+
 	player.lock_movement()
 	if _cam_tween:
 		_cam_tween.kill()
@@ -1036,6 +1005,38 @@ func set_entry_position_from_anchor(room: Vector2i) -> void:
 	var anchor := _get_anchor_for_room(room)
 	if anchor != null:
 		room_entry_positions[room] = Vector2i(floori(anchor.position.x / TILE_SIZE), floori(anchor.position.y / TILE_SIZE))
+
+# A room is dark when its TeleportAnchor has the `darkness` toggle set.
+func _is_room_dark(room: Vector2i) -> bool:
+	var anchor := _get_anchor_for_room(room)
+	return anchor != null and anchor.darkness
+
+# Powered LightSource nodes in the current room (the room-scoping divergence that
+# stays in the scene; the editor's copy takes all powered sources).
+func _powered_light_sources() -> Array:
+	var out: Array = []
+	var rx0 := current_room.x * ROOM_WIDTH
+	var ry0 := current_room.y * ROOM_HEIGHT
+	for ls in get_tree().get_nodes_in_group("light_sources"):
+		if is_instance_valid(ls) and ls.is_powered() and RoomUtils.in_room(ls.get_grid_pos(), rx0, ry0):
+			out.append(ls)
+	return out
+
+# Light circles for the darkness overlay: always the player, plus powered LightSources.
+func _gather_lights() -> Array:
+	return LightUtils.gather_lights(player.get_body_center(), PLAYER_LIGHT_RADIUS, _powered_light_sources())
+
+# True while the current room is actually being rendered dark.
+func is_room_dark_active() -> bool:
+	return _darkness != null and _darkness.is_dark()
+
+# Away-from-light push at `world_pos` from powered LightSources only (never the
+# player's light); Vector2.ZERO when the room isn't dark or the point is clear. Used
+# by SpiderEnemy to flee the light — see LightUtils.object_flee_vector for hysteresis.
+func light_flee_vector(world_pos: Vector2, exit_radius: float, fleeing: bool) -> Vector2:
+	if not is_room_dark_active():
+		return Vector2.ZERO
+	return LightUtils.object_flee_vector(world_pos, _powered_light_sources(), exit_radius, fleeing)
 
 func _get_anchor_for_room(room: Vector2i) -> Node:
 	var rx0 := room.x * ROOM_WIDTH

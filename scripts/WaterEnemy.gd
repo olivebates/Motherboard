@@ -42,8 +42,8 @@ func _ready() -> void:
 # have their own sheets, so no flip_h is needed.
 const _IDLE_FRAMES = 4
 const _RUN_FRAMES = 6
-const _IDLE_FPS = 8.0 / 3.0
-const _RUN_FPS = 12.0 / 3.0
+const _IDLE_FPS = 8.0 / 3.0 * 1.2    # +20%
+const _RUN_FPS = 12.0 / 3.0 * 1.2    # +20%
 
 func _setup_animations() -> void:
 	if _anim == null:
@@ -74,7 +74,7 @@ func _add_strip(frames: SpriteFrames, anim: String, path: String, count: int, fp
 
 # Faces the player and switches between idle/run based on whether the enemy
 # actually moved this frame.
-func _update_animation(moved: Vector2) -> void:
+func _update_animation(moved: Vector2, delta: float) -> void:
 	if _anim == null:
 		return
 	var to_player = _main.player.get_body_center() - get_center()
@@ -82,7 +82,10 @@ func _update_animation(moved: Vector2) -> void:
 		_facing = "right" if to_player.x > 0.0 else "left"
 	else:
 		_facing = "front" if to_player.y > 0.0 else "back"
-	var is_moving = moved.length() > 0.5
+	# Frame-rate independent: "moving" means it covered a meaningful fraction of a
+	# full step this frame. A fixed pixel threshold breaks at high refresh rates,
+	# where each frame's step is tiny and a moving enemy would read as idle.
+	var is_moving = moved.length() > SPEED * delta * 0.5
 	var anim = _facing + ("_run" if is_moving else "_idle")
 	if _anim.animation != anim:
 		_anim.play(anim)
@@ -147,7 +150,7 @@ func _process(delta: float) -> void:
 	var prev = position
 	super._process(delta)
 	if not _dead:
-		_update_animation(position - prev)
+		_update_animation(position - prev, delta)
 
 func reset() -> void:
 	super.reset()

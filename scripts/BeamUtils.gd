@@ -125,6 +125,9 @@ static func _order_self_crosses(order: Array, coords: Array, seg_a: Vector2, seg
 ## evaluate_puzzle). Callers keep their own (divergent) path computation; only this
 ## tail is shared.
 static func apply_beam_result(beam: Node, blockers: Array, world_positions: Array, path: Array) -> void:
+	# Remember the routed path so the prong_teleport cycle can ride it (it is [] in
+	# the blocked / single-prong cases below, falling back to plain prong-to-prong).
+	GameManager.beam_path = path
 	if world_positions.size() == 2:
 		if path.is_empty():
 			# No clear route — flash the blockers on the direct line so the player

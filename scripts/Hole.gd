@@ -51,6 +51,12 @@ func _ready() -> void:
 func get_grid_pos() -> Vector2i:
 	return grid_pos
 
+# Beam point for chain routing — only meaningful while this hole is filled with a
+# Nut (it joins the "nuts" group then; see _finalize_fill). The conductor sits at
+# the center of the hole's tile.
+func get_beam_point() -> Vector2:
+	return GridUtils.tile_center(GridUtils.to_world(grid_pos))
+
 func is_solid() -> bool:
 	# Empty, mid-fill, and droid-filled holes block like a wall; only a hole
 	# fully filled by a pushable object is passable.
@@ -118,6 +124,13 @@ func _finalize_fill(block: Node) -> void:
 	match _block_kind(block):
 		"nut":
 			sprite.texture = TEX_NUT
+			# A hole capped by a Nut conducts: it joins the chain group (the absorbed
+			# Nut was pulled out of it in _absorb_block) so the beam can route through
+			# this tile and the player can ride the lightning onto it.
+			if not is_in_group("nuts"):
+				add_to_group("nuts")
+			if _main != null and _main.has_method("_update_beam"):
+				_main._update_beam()
 		"block":
 			sprite.texture = TEX_FILLED
 		"windblock":
@@ -163,6 +176,9 @@ func _block_kind(block: Node) -> String:
 	return "other"
 
 func reset() -> void:
+	# Stop conducting (a nut-filled hole joins the chain group; see _finalize_fill).
+	if is_in_group("nuts"):
+		remove_from_group("nuts")
 	for block in _consumed_blocks:
 		if not is_instance_valid(block):
 			continue

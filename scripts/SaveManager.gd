@@ -205,14 +205,17 @@ func _build_save_data() -> Dictionary:
 		})
 	data["enemies"] = enemies_state
 
+	# `main` is the LevelEditor during a playtest, which has no map_overlay — use
+	# get() so a missing property reads as null instead of throwing.
+	var map_overlay = main.get("map_overlay")
 	var visited := []
-	if main.map_overlay != null:
-		for room in main.map_overlay.get_visited():
+	if map_overlay != null:
+		for room in map_overlay.get_visited():
 			var rv := room as Vector2i
 			visited.append([rv.x, rv.y])
 	data["map_visited"] = visited
-	if main.map_overlay != null:
-		data["map_hint_state"] = main.map_overlay.get_hint_state()
+	if map_overlay != null:
+		data["map_hint_state"] = map_overlay.get_hint_state()
 
 	return data
 

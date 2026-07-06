@@ -40,6 +40,7 @@ const SCENE_MAP = {
 	"NanoDroid":        "res://scenes/objects/NanoDroid.tscn",
 	"Hole":             "res://scenes/objects/Hole.tscn",
 	"Capacitor":        "res://scenes/objects/Capacitor.tscn",
+	"LightSource":      "res://scenes/objects/LightSource.tscn",
 	"WaterEnemy":       "res://scenes/enemies/WaterEnemy.tscn",
 	"BounceEnemy":      "res://scenes/enemies/BounceEnemy.tscn",
 	"SpiderEnemy":      "res://scenes/enemies/SpiderEnemy.tscn",
@@ -70,6 +71,7 @@ const PALETTE_SPRITES = {
 	"NanoDroid":        "res://Sprites/objects/Nanobot_Back_Idle.png",
 	"Hole":             "res://Sprites/objects/Holes/hole1.png",
 	"Capacitor":        "res://Sprites/objects/Capaciter-Sheet.webp",
+	"LightSource":      "res://Sprites/objects/floor_switch.png",
 	"DustPile":         "res://Sprites/objects/Dust_Pile_Alternate.png",
 	"BreakableWall":    "res://Sprites/objects/wall_breakable.png",
 	"KeyBreakableWall": "res://Sprites/objects/wall_breakable.png",
@@ -112,6 +114,11 @@ var selected_type: String = "Wires"
 var selected_object: Node = null
 var placing_wall: bool = false
 var _palette_buttons: Dictionary = {}
+
+# Playtest-only "dark room" preview. The toggle above the palette turns it on; the
+# overlay (shared DarknessOverlay component) only runs while playtesting.
+var _darkness: DarknessOverlay
+var _dark_toggle: CheckBox
 
 var placed_objects: Array = []
 var player_spawn_pos: Vector2i = Vector2i(-1, -1)
@@ -293,9 +300,15 @@ func _ready() -> void:
 	$EditorUI/TopBar/ImportButton.pressed.connect(_on_import_pressed)
 
 	_build_palette()
+	_setup_dark_toggle()
 	toast_label.visible = false
 	placing_hint.visible = false
 	_setup_play_label()
+
+	_darkness = DarknessOverlay.new()
+	add_child(_darkness)
+	# Keep the editor UI (incl. the "SPACE" exit prompt) above the dark overlay (layer 40).
+	($EditorUI as CanvasLayer).layer = 50
 
 	_place_border_walls()
 	_set_mode(Mode.BUILD)
@@ -347,7 +360,6 @@ func _build_palette() -> void:
 			var base_path = PALETTE_SPRITES["BreakableWall"] if t == "KeyBreakableWall" else PALETTE_SPRITES["DustPile"]
 			var container = Button.new()
 			container.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
-			container.tooltip_text = t
 			container.flat = false
 			container.pressed.connect(func(): _select_type(t))
 			var base_rect = TextureRect.new()
@@ -371,7 +383,6 @@ func _build_palette() -> void:
 			var kd_container = Button.new()
 			kd_container.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
 			kd_container.clip_contents = true
-			kd_container.tooltip_text = t
 			kd_container.flat = false
 			kd_container.pressed.connect(func(): _select_type(t))
 			var kd_raw = load(PALETTE_SPRITES["KeyDoor"]) as Texture2D
@@ -399,7 +410,6 @@ func _build_palette() -> void:
 			var cap_container = Button.new()
 			cap_container.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
 			cap_container.clip_contents = true
-			cap_container.tooltip_text = t
 			cap_container.flat = false
 			cap_container.pressed.connect(func(): _select_type(t))
 			var cap_raw = load(PALETTE_SPRITES["Capacitor"]) as Texture2D
@@ -427,7 +437,6 @@ func _build_palette() -> void:
 			var be_container = Button.new()
 			be_container.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
 			be_container.clip_contents = true
-			be_container.tooltip_text = t
 			be_container.flat = false
 			be_container.pressed.connect(func(): _select_type(t))
 			var be_rect = TextureRect.new()
@@ -446,7 +455,6 @@ func _build_palette() -> void:
 			btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
 			if PALETTE_SPRITES.has(t):
 				btn.texture_normal = _first_frame_texture(PALETTE_SPRITES[t])
-			btn.tooltip_text = t
 			btn.pressed.connect(func(): _select_type(t))
 			if t == "SpiderEnemy":
 				var img = load(PALETTE_SPRITES["SpiderEnemy"]).get_image()
@@ -456,6 +464,19 @@ func _build_palette() -> void:
 			_palette_buttons[t] = btn
 
 	_highlight_palette(selected_type)
+
+# Checkbox above the palette (bottom-left) that makes the room dark during playtests.
+func _setup_dark_toggle() -> void:
+	_dark_toggle = CheckBox.new()
+	_dark_toggle.text = "Dark"
+	_dark_toggle.focus_mode = Control.FOCUS_NONE
+	_dark_toggle.add_theme_font_size_override("font_size", 11)
+	_dark_toggle.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_dark_toggle.offset_left = 12
+	_dark_toggle.offset_right = 172
+	_dark_toggle.offset_top = -112
+	_dark_toggle.offset_bottom = -86
+	($EditorUI as CanvasLayer).add_child(_dark_toggle)
 
 func _select_type(t: String) -> void:
 	selected_type = t
@@ -493,6 +514,8 @@ func _set_mode(new_mode: int) -> void:
 	props_panel.visible = false
 	placing_hint.visible = false
 	ghost_sprite.visible = false
+	if _dark_toggle != null:
+		_dark_toggle.visible = new_mode == Mode.BUILD
 	_drag_placing = false
 	_drag_deleting = false
 	if _x_deleting:
@@ -554,6 +577,9 @@ func _process(_delta: float) -> void:
 		_controls_label.visible = mode == Mode.PLACING and not _wire_mode
 
 	_update_space_label()
+
+	if _darkness != null and _darkness.visible and mode == Mode.PLAY:
+		_darkness.update_lights(camera, _gather_lights())
 
 	# Holding X deletes whatever is under the cursor, like a right-click drag
 	if _process_x_delete():
@@ -643,7 +669,16 @@ func _input(event: InputEvent) -> void:
 					_set_mode(Mode.BUILD)
 				get_viewport().set_input_as_handled()
 		KEY_Z:
-			if mode != Mode.PLAY:
+			if mode == Mode.PLAY:
+				# Gameplay push undo/redo during a playtest (matches Main): Z undoes the
+				# last block push, and again redoes it when there's nothing left to undo.
+				if is_instance_valid(_play_player) and not _play_player.movement_locked:
+					if _last_push != null:
+						undo_last_push()
+					elif _undo_push != null:
+						redo_last_push()
+				get_viewport().set_input_as_handled()
+			else:
 				_undo_last_action()
 				get_viewport().set_input_as_handled()
 		KEY_C:
@@ -1295,9 +1330,6 @@ func _is_static_solid(gp: Vector2i, include_holes: bool = true) -> bool:
 	for blocker in get_tree().get_nodes_in_group("lightning_blockers"):
 		if blocker.get_grid_pos() == gp:
 			return true
-	for screw in get_tree().get_nodes_in_group("screws"):
-		if screw.get_grid_pos() == gp:
-			return true
 	for wall in get_tree().get_nodes_in_group("breakable_walls"):
 		if not wall._destroyed and wall.get_grid_pos() == gp:
 			return true
@@ -1381,7 +1413,35 @@ func teleport_between_prongs(target_center: Vector2) -> void:
 	await PlayerUtils.teleport_between_prongs(_play_player, target_center)
 
 func shoot_door_ball(_from: Vector2, _to: Vector2, callback: Callable) -> void: callback.call()
-func record_push(_block, _from_pos: Vector2i, _dir: Vector2i) -> void: pass
+
+# One-deep gameplay push history for the playtest (Z = undo / redo), mirroring Main.
+# The geometry is shared via PushHistoryUtils; only the pointers live here.
+var _last_push = null
+var _undo_push = null
+
+func record_push(block: Node, from_pos: Vector2i, dir: Vector2i) -> void:
+	_last_push = {"block": block, "from": from_pos, "dir": dir}
+	_undo_push = null
+
+func undo_last_push() -> void:
+	if _last_push == null:
+		return
+	if not is_instance_valid(_last_push.block):
+		_last_push = null
+		return
+	if PushHistoryUtils.apply_undo(self, _last_push):
+		_undo_push = _last_push
+		_last_push = null
+
+func redo_last_push() -> void:
+	if _undo_push == null:
+		return
+	if not is_instance_valid(_undo_push.block):
+		_undo_push = null
+		return
+	if PushHistoryUtils.apply_redo(self, _undo_push):
+		_last_push = _undo_push
+		_undo_push = null
 
 class _PlayerStub extends Node2D:
 	func get_body_center() -> Vector2:
@@ -1413,6 +1473,8 @@ func _enter_play_mode() -> void:
 			file.close()
 
 	_play_spawn_pos = player_spawn_pos if player_spawn_pos != Vector2i(-1, -1) else Vector2i(2, 2)
+	_last_push = null
+	_undo_push = null
 
 	_restore_objects()
 
@@ -1435,6 +1497,10 @@ func _enter_play_mode() -> void:
 	for node in get_tree().get_nodes_in_group("fans"):
 		if node.get("id") != null and node.id != "":
 			GameManager.register_door(node, node.id)
+	# LightSources are powered like doors, so their ids must be registered too.
+	for node in get_tree().get_nodes_in_group("light_sources"):
+		if node.get("id") != null and node.id != "":
+			GameManager.register_door(node, node.id)
 
 	_play_beam = ElectricBeamScene.instantiate()
 	add_child(_play_beam)
@@ -1453,9 +1519,14 @@ func _enter_play_mode() -> void:
 		door._keys_total = 0
 		door.call_deferred("_count_keys")
 
+	if _darkness != null:
+		_darkness.set_dark(_dark_toggle != null and _dark_toggle.button_pressed, false)
+
 	_set_mode(Mode.PLAY)
 
 func _exit_play_mode() -> void:
+	if _darkness != null:
+		_darkness.set_dark(false, false)
 	for p in GameManager.clear_prongs():
 		if is_instance_valid(p["node"]):
 			p["node"].queue_free()
@@ -1479,6 +1550,34 @@ func _exit_play_mode() -> void:
 
 	player_marker.visible = player_spawn_pos != Vector2i(-1, -1)
 	_set_mode(Mode.BUILD)
+
+# Light circles for the darkness overlay during a playtest: the player plus any
+# powered LightSource. Mirrors Main._gather_lights() (single room in the editor).
+const PLAYER_LIGHT_RADIUS := 64.0
+
+# Powered LightSource nodes (single editor room, so no room filter — the room-scoping
+# divergence from Main._powered_light_sources() stays here in the scene).
+func _powered_light_sources() -> Array:
+	var out: Array = []
+	for ls in get_tree().get_nodes_in_group("light_sources"):
+		if is_instance_valid(ls) and ls.is_powered():
+			out.append(ls)
+	return out
+
+func _gather_lights() -> Array:
+	var player_pos: Vector2 = _play_player.get_body_center() if is_instance_valid(_play_player) else Vector2.ZERO
+	return LightUtils.gather_lights(player_pos, PLAYER_LIGHT_RADIUS, _powered_light_sources())
+
+# True while the playtest is running dark (mirrors Main.is_room_dark_active()).
+func is_room_dark_active() -> bool:
+	return _darkness != null and _darkness.is_dark()
+
+# Away-from-light push at world_pos from powered LightSources only; Vector2.ZERO when
+# not dark or clear. Mirrors Main.light_flee_vector().
+func light_flee_vector(world_pos: Vector2, exit_radius: float, fleeing: bool) -> Vector2:
+	if not is_room_dark_active():
+		return Vector2.ZERO
+	return LightUtils.object_flee_vector(world_pos, _powered_light_sources(), exit_radius, fleeing)
 
 func _player_on_exit_point() -> bool:
 	if _play_player == null or not is_instance_valid(_play_player):
@@ -1543,6 +1642,8 @@ func _update_beam() -> void:
 func _reset_room() -> void:
 	if _play_player == null or not is_instance_valid(_play_player):
 		return
+	_last_push = null
+	_undo_push = null
 	_play_player.lock_movement()
 	for p in GameManager.clear_prongs():
 		if is_instance_valid(p["node"]):

@@ -31,6 +31,11 @@ var capacitor_ids: Array = []
 # chains through. A conductor sitting on a floor panel activates that panel, same
 # as a prong. Refreshed by Main/LevelEditor._update_beam each time the beam changes.
 var beam_conductor_points: Array = []
+# The active beam route exactly as BeamUtils.best_beam_path returned it:
+# [prongA circuit_pos (Vector2), conductor nodes…, prongB circuit_pos (Vector2)],
+# or [] when there is no clear two-prong route. Drives the prong_teleport ride-the-
+# lightning cycle (Player._build_teleport_cycle). Refreshed by apply_beam_result.
+var beam_path: Array = []
 
 func register_floor_panel(grid_pos: Vector2i, id: String, id2: String = "") -> void:
 	var ids: Array = [id]
@@ -102,6 +107,7 @@ func clear_scene_state() -> void:
 	floor_switch_ids.clear()
 	capacitor_ids.clear()
 	beam_conductor_points.clear()
+	beam_path.clear()
 	beam_blocked = false
 
 const PANEL_ACTIVATION_RADIUS := 24.0

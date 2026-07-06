@@ -2,6 +2,19 @@ extends "res://scripts/WaterEnemy.gd"
 
 const WIND_BLOCK_SCENE = preload("res://scenes/objects/WindBlock.tscn")
 
+# Visuals: a dust pile that blinks while dormant, plays a one-shot transform when
+# the player wakes it, then becomes the bunny.
+const BUNNY_TEX = preload("res://Sprites/enemies/BounceFront.png")
+const BLINK_TEX = preload("res://Sprites/enemies/DustBunnies/Dust_Blink-Sheet.webp")
+const TRANSFORM_TEX = preload("res://Sprites/enemies/DustBunnies/Dust_Transform_into_Bunny.webp")
+const TRANSFORM_FRAMES := 16
+# 16 frames over 1.3s.
+const TRANSFORM_FPS := TRANSFORM_FRAMES / 1.3
+# Idle blink: hold frame 0, occasionally flick to frame 1 for half a second.
+const BLINK_HOLD := 0.2
+const BLINK_MIN := 1.5
+const BLINK_MAX := 4.0
+
 enum MoveState { IDLE, HOP, JUMP_WINDUP, JUMP }
 
 const BOUNCE_MAX_HP := 50
@@ -53,6 +66,13 @@ var _sprite_scale := Vector2.ONE
 var _idle_time := 0.0
 var _activated := false
 var _transforming := false
+# Dust-pile idle + wake-up transform visuals.
+var _dust_blink: Sprite2D
+var _activating := false
+var _transform_time := 0.0
+var _blink_timer := 0.0
+var _blink_hold := 0.0
+var _blinking := false
 
 @onready var _hitbox_shape: CollisionShape2D = $HitboxArea/HitboxShape
 
@@ -113,6 +133,18 @@ func _ready() -> void:
 	var start_gp := _world_to_grid(_start_pos - Vector2(0.0, _ground_offset()))
 	_room_x0 = floori(float(start_gp.x) / ROOM_WIDTH) * ROOM_WIDTH
 	_room_y0 = floori(float(start_gp.y) / ROOM_HEIGHT) * ROOM_HEIGHT
+	_setup_dust_visuals()
+	_show_dust_idle()
+
+# Builds the 32×32 dust-pile sprite shown while dormant. Sits bottom-centered on
+# the tile (its bottom line matches the bunny's, accounting for the origin shift).
+func _setup_dust_visuals() -> void:
+	_dust_blink = Sprite2D.new()
+	_dust_blink.texture = BLINK_TEX
+	_dust_blink.hframes = 2
+	_dust_blink.centered = false
+	_dust_blink.position = Vector2(0.0, -_ground_offset())
+	add_child(_dust_blink)
 
 func _process(delta: float) -> void:
 	_update_health_bar()
@@ -143,12 +175,16 @@ func _process(delta: float) -> void:
 
 	if _move_state == MoveState.IDLE:
 		if not _activated:
-			# Sit still and idle-bob until the player gets close enough to wake it.
+			# Dust pile: blink in place until the player gets close enough to wake it.
 			if (_main.player.get_body_center() - get_center()).length() <= ACTIVATION_RADIUS:
 				_activated = true
+				_begin_activation()
 			else:
-				_idle_bob(delta)
-				_sync_sprite(delta)
+				_process_blink(delta)
+				return
+		if _activating:
+			# Play the wake-up transform once before any movement.
+			if _process_activation(delta):
 				return
 		_path_timer -= delta
 		if _path_timer <= 0.0:
@@ -195,6 +231,70 @@ func _idle_bob(delta: float) -> void:
 	_idle_time += delta
 	var bob := sin(_idle_time * TAU * 1.1) * 0.05
 	_apply_scale_target(Vector2(1.0 + bob, 1.0 - bob), delta)
+
+# Dormant dust pile: shows the bunny-less blink sprite, hides everything else.
+func _show_dust_idle() -> void:
+	_activating = false
+	_transform_time = 0.0
+	_blinking = false
+	_blink_hold = 0.0
+	_blink_timer = randf_range(BLINK_MIN, BLINK_MAX)
+	_sprite_scale = Vector2.ONE
+	_sprite.scale = Vector2.ONE
+	# Restore the bunny on the base sprite for when it later activates.
+	_sprite.texture = BUNNY_TEX
+	_sprite.hframes = 1
+	_sprite.frame = 0
+	_sprite.visible = false
+	if _dust_blink != null:
+		_dust_blink.frame = 0
+		_dust_blink.visible = true
+
+# Holds blink frame 0, flicking to frame 1 (eyes shut) for BLINK_HOLD seconds at
+# random intervals.
+func _process_blink(delta: float) -> void:
+	if _dust_blink == null:
+		return
+	if _blinking:
+		_blink_hold -= delta
+		if _blink_hold <= 0.0:
+			_blinking = false
+			_dust_blink.frame = 0
+			_blink_timer = randf_range(BLINK_MIN, BLINK_MAX)
+	else:
+		_blink_timer -= delta
+		if _blink_timer <= 0.0:
+			_blinking = true
+			_blink_hold = BLINK_HOLD
+			_dust_blink.frame = 1
+
+# Swaps the dust pile out for the one-shot transform sheet on the base sprite.
+func _begin_activation() -> void:
+	_activating = true
+	_transform_time = 0.0
+	_sprite_scale = Vector2.ONE
+	_sprite.scale = Vector2.ONE
+	if _dust_blink != null:
+		_dust_blink.visible = false
+	_sprite.texture = TRANSFORM_TEX
+	_sprite.hframes = TRANSFORM_FRAMES
+	_sprite.frame = 0
+	_sprite.visible = true
+
+# Steps the transform animation. Returns true while it is still playing; on the
+# frame it finishes it swaps in the bunny and returns false so movement can begin.
+func _process_activation(delta: float) -> bool:
+	_transform_time += delta
+	var idx := int(_transform_time * TRANSFORM_FPS)
+	if idx >= TRANSFORM_FRAMES:
+		_activating = false
+		_sprite.texture = BUNNY_TEX
+		_sprite.hframes = 1
+		_sprite.frame = 0
+		return false
+	_sprite.frame = idx
+	_sync_sprite(delta)
+	return true
 
 # Resting sprite offset (scale 1, no hop arc, no lag) — the value _sync_sprite()
 # produces at rest, so the editor-placed sprite lands where it sits on the first
@@ -392,3 +492,4 @@ func reset() -> void:
 	_sprite_scale = Vector2.ONE
 	_sprite.scale = Vector2.ONE
 	_sprite.position = _rest_sprite_position()
+	_show_dust_idle()
