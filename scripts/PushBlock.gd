@@ -1,8 +1,6 @@
 extends Node2D
 
 const TILE_SIZE := 32
-const SLIDE_DURATION := 0.15
-const SPRITE_OFFSET := Vector2.ZERO
 const HIGHLIGHT_COLOR := Color.WHITE
 const HIGHLIGHT_LINE_WIDTH := 1.5
 # Border oscillates ±1 px around this base offset from the block edge
@@ -21,9 +19,9 @@ func _ready() -> void:
 	add_to_group("push_blocks")
 	start_grid_pos = GridUtils.to_grid(position)
 	grid_pos = start_grid_pos
-	position = _grid_to_world(grid_pos)
+	position = PushBlockUtils.grid_to_world(grid_pos)
 	sprite.centered = false
-	sprite.position = SPRITE_OFFSET
+	sprite.position = PushBlockUtils.SPRITE_OFFSET
 
 func _process(delta: float) -> void:
 	if _highlighted:
@@ -45,35 +43,12 @@ func set_highlight(val: bool) -> void:
 	queue_redraw()
 
 func get_collision_rect() -> Rect2:
-	return Rect2(
-		grid_pos.x * TILE_SIZE,
-		grid_pos.y * TILE_SIZE,
-		float(TILE_SIZE),
-		float(TILE_SIZE)
-	)
+	return PushBlockUtils.collision_rect(grid_pos)
 
 func push(direction: Vector2i) -> void:
 	if _highlighted:
 		_clear_all_highlights()
-
-	var old_world := _grid_to_world(grid_pos)
-	grid_pos += direction
-	var new_world := _grid_to_world(grid_pos)
-	position = new_world
-	sprite.position = old_world - new_world + SPRITE_OFFSET
-
-	for enemy in get_tree().get_nodes_in_group("enemies"):
-		var ec = enemy.get_center()
-		var enemy_tile := Vector2i(floori(ec.x / TILE_SIZE), floori(ec.y / TILE_SIZE))
-		if enemy_tile == grid_pos:
-			enemy.push(direction)
-
-	if _tween:
-		_tween.kill()
-	_tween = create_tween()
-	_tween.set_ease(Tween.EASE_OUT)
-	_tween.set_trans(Tween.TRANS_SINE)
-	_tween.tween_property(sprite, "position", SPRITE_OFFSET, SLIDE_DURATION)
+	PushBlockUtils.push(self, direction)
 
 func _clear_all_highlights() -> void:
 	for b in get_tree().get_nodes_in_group("push_blocks"):
@@ -81,26 +56,8 @@ func _clear_all_highlights() -> void:
 			b.set_highlight(false)
 
 func push_undo(old_pos: Vector2i) -> void:
-	var cur_world := _grid_to_world(grid_pos)
-	grid_pos = old_pos
-	var old_world := _grid_to_world(old_pos)
-	position = old_world
-	sprite.position = cur_world - old_world + SPRITE_OFFSET
-	if _tween:
-		_tween.kill()
-	_tween = create_tween()
-	_tween.set_ease(Tween.EASE_OUT)
-	_tween.set_trans(Tween.TRANS_SINE)
-	_tween.tween_property(sprite, "position", SPRITE_OFFSET, SLIDE_DURATION)
+	PushBlockUtils.push_undo(self, old_pos)
 
 func reset() -> void:
-	if _tween:
-		_tween.kill()
-	grid_pos = start_grid_pos
-	position = _grid_to_world(grid_pos)
-	sprite.position = SPRITE_OFFSET
-	sprite.scale = Vector2.ONE
+	PushBlockUtils.reset(self)
 	set_highlight(false)
-
-func _grid_to_world(gp: Vector2i) -> Vector2:
-	return Vector2(gp.x * TILE_SIZE, gp.y * TILE_SIZE)

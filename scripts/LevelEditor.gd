@@ -71,7 +71,7 @@ const PALETTE_SPRITES = {
 	"NanoDroid":        "res://Sprites/objects/Nanobot_Back_Idle.png",
 	"Hole":             "res://Sprites/objects/Holes/hole1.png",
 	"Capacitor":        "res://Sprites/objects/Capaciter-Sheet.webp",
-	"LightSource":      "res://Sprites/objects/floor_switch.png",
+	"LightSource":      "res://Sprites/objects/LED_Light-Sheet.webp",
 	"DustPile":         "res://Sprites/objects/Dust_Pile_Alternate.png",
 	"BreakableWall":    "res://Sprites/objects/wall_breakable.png",
 	"KeyBreakableWall": "res://Sprites/objects/wall_breakable.png",
@@ -119,6 +119,8 @@ var _palette_buttons: Dictionary = {}
 # overlay (shared DarknessOverlay component) only runs while playtesting.
 var _darkness: DarknessOverlay
 var _dark_toggle: CheckBox
+var _no_gravity_toggle: CheckBox
+var _no_gravity_time := 0.0
 
 var placed_objects: Array = []
 var player_spawn_pos: Vector2i = Vector2i(-1, -1)
@@ -301,6 +303,7 @@ func _ready() -> void:
 
 	_build_palette()
 	_setup_dark_toggle()
+	_setup_no_gravity_toggle()
 	toast_label.visible = false
 	placing_hint.visible = false
 	_setup_play_label()
@@ -432,8 +435,20 @@ func _build_palette() -> void:
 			cap_container.add_child(cap_rect)
 			palette_list.add_child(cap_container)
 			_palette_buttons[t] = cap_container
+		elif t == "LightSource":
+			# 32x40 LED sheet; show the whole first frame aspect-fit (dome + base visible)
+			var ls_btn = TextureButton.new()
+			ls_btn.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
+			ls_btn.ignore_texture_size = true
+			ls_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+			var ls_atlas = AtlasTexture.new()
+			ls_atlas.atlas = load(PALETTE_SPRITES["LightSource"]) as Texture2D
+			ls_atlas.region = Rect2(0, 0, 32, 40)
+			ls_btn.texture_normal = ls_atlas
+			ls_btn.pressed.connect(func(): _select_type(t))
+			palette_list.add_child(ls_btn)
+			_palette_buttons[t] = ls_btn
 		elif t == "BounceEnemy":
-			# 64×64 sprite shown bottom-center anchored, scaled to fit the cell
 			var be_container = Button.new()
 			be_container.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
 			be_container.clip_contents = true
@@ -478,6 +493,21 @@ func _setup_dark_toggle() -> void:
 	_dark_toggle.offset_bottom = -86
 	($EditorUI as CanvasLayer).add_child(_dark_toggle)
 
+# Checkbox 8px above the Dark toggle that turns gravity off during playtests: pushed
+# blocks slide until they hit a wall and resting blocks bob to float (see GravityUtils).
+func _setup_no_gravity_toggle() -> void:
+	_no_gravity_toggle = CheckBox.new()
+	_no_gravity_toggle.text = "No Gravity"
+	_no_gravity_toggle.focus_mode = Control.FOCUS_NONE
+	_no_gravity_toggle.add_theme_font_size_override("font_size", 11)
+	_no_gravity_toggle.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_no_gravity_toggle.offset_left = 12
+	_no_gravity_toggle.offset_right = 172
+	# 8px above the Dark toggle (its top is -112; this box is 26px tall).
+	_no_gravity_toggle.offset_top = -146
+	_no_gravity_toggle.offset_bottom = -120
+	($EditorUI as CanvasLayer).add_child(_no_gravity_toggle)
+
 func _select_type(t: String) -> void:
 	selected_type = t
 	placing_wall = (t == "Wall")
@@ -516,6 +546,8 @@ func _set_mode(new_mode: int) -> void:
 	ghost_sprite.visible = false
 	if _dark_toggle != null:
 		_dark_toggle.visible = new_mode == Mode.BUILD
+	if _no_gravity_toggle != null:
+		_no_gravity_toggle.visible = new_mode == Mode.BUILD
 	_drag_placing = false
 	_drag_deleting = false
 	if _x_deleting:
@@ -556,7 +588,7 @@ func _set_mode(new_mode: int) -> void:
 # ──────────────────────────────────────────────
 #  Process — ghost sprite update
 # ──────────────────────────────────────────────
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _web_waiting_upload:
 		var content = JavaScriptBridge.eval("window._godotUploadContent")
 		if typeof(content) == TYPE_STRING:
@@ -580,6 +612,8 @@ func _process(_delta: float) -> void:
 
 	if _darkness != null and _darkness.visible and mode == Mode.PLAY:
 		_darkness.update_lights(camera, _gather_lights())
+
+	_update_no_gravity_float(delta)
 
 	# Holding X deletes whatever is under the cursor, like a right-click drag
 	if _process_x_delete():
@@ -1345,6 +1379,9 @@ func _is_static_solid(gp: Vector2i, include_holes: bool = true) -> bool:
 	for capacitor in get_tree().get_nodes_in_group("capacitors"):
 		if capacitor.get_grid_pos() == gp:
 			return true
+	for light in get_tree().get_nodes_in_group("light_sources"):
+		if light.get_grid_pos() == gp:
+			return true
 	for ep in get_tree().get_nodes_in_group("exit_points"):
 		if not ep.is_open and ep.get_grid_pos() == gp:
 			return true
@@ -1571,6 +1608,24 @@ func _gather_lights() -> Array:
 # True while the playtest is running dark (mirrors Main.is_room_dark_active()).
 func is_room_dark_active() -> bool:
 	return _darkness != null and _darkness.is_dark()
+
+# True while the "No Gravity" toggle is on during a playtest (mirrors Main).
+func is_current_room_no_gravity() -> bool:
+	return mode == Mode.PLAY and _no_gravity_toggle != null and _no_gravity_toggle.button_pressed
+
+func gravity_slide_dir(block: Node, dir: Vector2i) -> Vector2i:
+	return GravityUtils.slide_dir(self, block, dir)
+
+# Bob every resting pushable block so it looks like it's floating (single editor room,
+# so no room filter — mirrors Main._update_no_gravity_float()).
+func _update_no_gravity_float(delta: float) -> void:
+	if not is_current_room_no_gravity():
+		return
+	_no_gravity_time += delta
+	for b in get_tree().get_nodes_in_group("push_blocks"):
+		if b.is_in_group("fans") or not ("grid_pos" in b):
+			continue
+		b.position = Vector2(b.grid_pos * TILE_SIZE) + GravityUtils.float_offset(b.grid_pos, _no_gravity_time)
 
 # Away-from-light push at world_pos from powered LightSources only; Vector2.ZERO when
 # not dark or clear. Mirrors Main.light_flee_vector().
@@ -1999,6 +2054,12 @@ func _apply_ghost_texture_to(spr: Sprite2D, type: String) -> void:
 		spr.region_rect = Rect2(0, 0, 32, 48)
 		spr.texture = raw_tex
 		spr.scale = Vector2.ONE
+	elif type == "LightSource":
+		# Show the full 32×40 first frame, bottom-anchored (dome bleeds above the tile)
+		spr.region_enabled = true
+		spr.region_rect = Rect2(0, 0, 32, 40)
+		spr.texture = raw_tex
+		spr.scale = Vector2.ONE
 	elif type == "BounceEnemy":
 		# Show the full 64×64 sprite (positioned bottom-center in _ghost_position_for)
 		spr.region_enabled = false
@@ -2022,6 +2083,9 @@ func _ghost_position_for(type: String, gp: Vector2i) -> Vector2:
 	elif type == "Capacitor":
 		# 48px-tall sprite, bottom aligned to tile bottom (32 - 48 = -16)
 		pos.y -= 16
+	elif type == "LightSource":
+		# 40px-tall sprite, bottom aligned to tile bottom (32 - 40 = -8)
+		pos.y -= 8
 	elif type == "BounceEnemy":
 		# 64×64 sprite: center horizontally on the tile and raise it so its
 		# bottom-center sits at the tile bottom-center (-16 x, -32 y).

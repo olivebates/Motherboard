@@ -336,13 +336,17 @@ func _try_push(input: Vector2, moved_x: bool, moved_y: bool, delta: float) -> vo
 
 	_reset_push_charge()
 	var push_from: Vector2i = block.grid_pos
-	block.push(dir)
+	# No-gravity rooms: the block slides until a solid stops it (several tiles at once).
+	var slide := dir
+	if _main.has_method("is_current_room_no_gravity") and _main.is_current_room_no_gravity():
+		slide = _main.gravity_slide_dir(block, dir)
+	block.push(slide)
 	_push_lock_dir = dir
 	_push_lock_time = PUSH_FREEZE
 	if _main.has_method("_trigger_shake"):
 		_main._trigger_shake(0.8)
 	if _main.has_method("record_push"):
-		_main.record_push(block, push_from, dir)
+		_main.record_push(block, push_from, slide)
 
 # ── Collision (mirrors Player axis-separated AABB sweep) ──────────────────────
 

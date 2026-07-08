@@ -40,6 +40,7 @@ var _color_tween: Tween = null
 # LightSource objects carry their own radius. See DarknessOverlay.gd.
 const PLAYER_LIGHT_RADIUS := 64.0
 var _darkness: DarknessOverlay
+var _no_gravity_time := 0.0
 
 var _tab_canvas: CanvasLayer
 var _tab_label: Label
@@ -77,6 +78,7 @@ const Y_SORT_GROUPS := [
 	"enemy_doors",
 	"nanodroids",
 	"capacitors",
+	"light_sources",
 ]
 
 func _ready() -> void:
@@ -615,6 +617,7 @@ func _process(delta: float) -> void:
 	_update_tab_label()
 	if _darkness != null and _darkness.visible:
 		_darkness.update_lights(camera, _gather_lights())
+	_update_no_gravity_float(delta)
 	if modulate != _last_btn_color:
 		_last_btn_color = modulate
 		_refresh_settings_colors(modulate)
@@ -839,6 +842,9 @@ func _is_static_solid(grid_pos: Vector2i, include_holes: bool = true) -> bool:
 	for capacitor in get_tree().get_nodes_in_group("capacitors"):
 		if capacitor.get_grid_pos() == grid_pos:
 			return true
+	for light in get_tree().get_nodes_in_group("light_sources"):
+		if light.get_grid_pos() == grid_pos:
+			return true
 	if include_holes:
 		for hole in get_tree().get_nodes_in_group("holes"):
 			if hole.is_solid() and hole.get_grid_pos() == grid_pos:
@@ -1010,6 +1016,33 @@ func set_entry_position_from_anchor(room: Vector2i) -> void:
 func _is_room_dark(room: Vector2i) -> bool:
 	var anchor := _get_anchor_for_room(room)
 	return anchor != null and anchor.darkness
+
+# A room has no gravity when its TeleportAnchor has the `no_gravity` toggle set.
+func _is_room_no_gravity(room: Vector2i) -> bool:
+	var anchor := _get_anchor_for_room(room)
+	return anchor != null and anchor.no_gravity
+
+func is_current_room_no_gravity() -> bool:
+	return _is_room_no_gravity(current_room)
+
+# Full displacement a pushed block should travel in a no-gravity room (slides until a
+# solid stops it). Callers guard on is_current_room_no_gravity() first.
+func gravity_slide_dir(block: Node, dir: Vector2i) -> Vector2i:
+	return GravityUtils.slide_dir(self, block, dir)
+
+# Bob every resting pushable block in the current room so it looks like it's floating.
+func _update_no_gravity_float(delta: float) -> void:
+	if not is_current_room_no_gravity():
+		return
+	_no_gravity_time += delta
+	var rx0 := current_room.x * ROOM_WIDTH
+	var ry0 := current_room.y * ROOM_HEIGHT
+	for b in get_tree().get_nodes_in_group("push_blocks"):
+		if b.is_in_group("fans") or not ("grid_pos" in b):
+			continue
+		if not RoomUtils.in_room(b.grid_pos, rx0, ry0):
+			continue
+		b.position = Vector2(b.grid_pos * TILE_SIZE) + GravityUtils.float_offset(b.grid_pos, _no_gravity_time)
 
 # Powered LightSource nodes in the current room (the room-scoping divergence that
 # stays in the scene; the editor's copy takes all powered sources).

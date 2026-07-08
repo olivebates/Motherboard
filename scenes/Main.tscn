@@ -1864,6 +1864,7 @@ music = "Yellow"
 position = Vector2(2432, 192)
 color = Color(0.7254902, 0.4627451, 0.27450982, 1)
 music = "Orange"
+no_gravity = true
 
 [node name="TeleportAnchor_0_5" parent="." instance=ExtResource("17_ta")]
 position = Vector2(3232, 192)

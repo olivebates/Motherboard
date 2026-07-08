@@ -52,6 +52,14 @@ const PLANT_FRAME_H := 64.0
 const PLANT_FPS := 12.0
 const PLANT_Y_OFFSET := 6.0
 
+# The root sits SORT_RAISE px ABOVE the hitbox bottom for Y-sort only, so the player
+# slips behind a solid once its feet come within SORT_RAISE px of the solid's tile top
+# (i.e. it goes behind a few px sooner). The raise is baked into _body_offset (which every
+# grid/collision/visual formula derives from) plus a one-time root raise in _ready, so the
+# hitbox, grid cell, and sprite are byte-identical to a raise of 0 — only position.y (the
+# sort key) shifts up.
+const SORT_RAISE := 4.0
+
 # Root position is hitbox bottom (Y-sort). Body holds sprite + hitbox at tile-center layout.
 var _half_w := 5.0
 var _half_h := 5.0
@@ -71,8 +79,11 @@ func _ready() -> void:
 	_half_w = cfg.half_w
 	_half_h = cfg.half_h
 	_hitbox_offset = cfg.offset
-	_body_offset = YSortHitboxBottom.body_offset_from_hitbox(_hitbox_offset, _half_h)
+	_body_offset = YSortHitboxBottom.body_offset_from_hitbox(_hitbox_offset, _half_h) + Vector2(0.0, SORT_RAISE)
 	_body.position = _body_offset
+	# Raise the authored root by the same amount so the feet/hitbox stay put while the
+	# sort key (position.y) moves up SORT_RAISE px.
+	position.y -= SORT_RAISE
 	visual_pos = position + _body_offset
 	if start_with_push:
 		GameManager.grant_ability("push")
@@ -454,10 +465,14 @@ func _try_push(raw: Vector2, moved_x: bool, moved_y: bool, main: Node, delta: fl
 	_push_charge_dir = Vector2i.ZERO
 	_push_charge_block = null
 	var push_from = block.grid_pos
-	block.push(dir)
+	# No-gravity rooms: the block slides until a solid stops it (several tiles at once).
+	var slide := dir
+	if main.has_method("is_current_room_no_gravity") and main.is_current_room_no_gravity():
+		slide = main.gravity_slide_dir(block, dir)
+	block.push(slide)
 	_start_push_lock(dir)
 	main._trigger_shake(0.8)
-	main.record_push(block, push_from, dir)
+	main.record_push(block, push_from, slide)
 	_push_kick_dir = dir
 	_push_kick_time = PUSH_KICK_TIME
 	_push_pose_dir = Vector2i.ZERO
